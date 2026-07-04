@@ -1,7 +1,5 @@
 name: Build Matter LED firmware (ESP32-C6, Thread)
 
-# Spustí se automaticky při každém pushnutí do repozitáře,
-# nebo ručně přes záložku "Actions" -> "Run workflow"
 on:
   push:
   workflow_dispatch:
@@ -14,6 +12,12 @@ jobs:
     steps:
       - name: Checkout projektu
         uses: actions/checkout@v4
+
+      - name: Diagnostika - vypis dostupnych zarizeni v device_hal
+        run: |
+          docker run --rm \
+            espressif/esp-matter:release-v1.5_idf_v5.4.1 \
+            bash -c "ls -la /opt/espressif/esp-matter/device_hal/device/ && echo '---' && cat /opt/espressif/esp-matter/device_hal/device/CMakeLists.txt"
 
       - name: Sestaveni pres oficialni Docker image espressif/esp-matter
         run: |
