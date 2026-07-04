@@ -49,7 +49,7 @@ set(EXTRA_COMPONENT_DIRS
     "${ESP_MATTER_PATH}/examples/common"
     "${MATTER_SDK_PATH}/config/esp32/components"
     "${ESP_MATTER_PATH}/components"
-    "${ESP_MATTER_PATH}/device_hal/device"
+    "${ESP_MATTER_PATH}/device_hal"
     ${extra_components_dirs_append})
 
 # app_reset vyzaduje komponentu 'button', kterou nemame (a nepotrebujeme -
