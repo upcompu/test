@@ -1,0 +1,18 @@
+# sdkconfig.defaults - společné nastavení pro Matter aplikaci
+
+CONFIG_IDF_TARGET="esp32c6"
+
+# Partition table s dostatkem místa pro Matter/Thread data
+CONFIG_PARTITION_TABLE_CUSTOM=y
+CONFIG_PARTITION_TABLE_CUSTOM_FILENAME="partitions.csv"
+
+# Zaklad Matter
+CONFIG_ENABLE_MATTER_SERVER=y
+CONFIG_ENABLE_CHIP_SHELL=y
+
+# BLE pro commissioning (parovani pres QR kod / setup kod)
+CONFIG_BT_ENABLED=y
+CONFIG_BT_NIMBLE_ENABLED=y
+
+# mbedTLS nastaveni doporucena Matter SDK
+CONFIG_MBEDTLS_CERTIFICATE_BUNDLE=n
