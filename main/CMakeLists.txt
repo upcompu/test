@@ -1,7 +1,6 @@
 idf_component_register(
     SRC_DIRS "."
     INCLUDE_DIRS "."
-    PRIV_INCLUDE_DIRS "${ESP_MATTER_PATH}/examples/common/utils"
 )
 
 # Verze aplikace vidí Matter OTA a Basic Information cluster
