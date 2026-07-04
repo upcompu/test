@@ -1,0 +1,73 @@
+name: Build Matter LED firmware (ESP32-C6, Thread)
+
+# Spustí se automaticky při každém pushnutí do repozitáře,
+# nebo ručně přes záložku "Actions" -> "Run workflow"
+on:
+  push:
+  workflow_dispatch:
+
+jobs:
+  build:
+    runs-on: ubuntu-22.04
+    # Cely build (klonovani + kompilace) muze trvat 30-60 minut
+    timeout-minutes: 120
+
+    steps:
+      - name: Checkout projektu (tento repozitar)
+        uses: actions/checkout@v4
+        with:
+          path: matter_led_c6
+
+      - name: Instalace systemovych zavislosti
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y git wget flex bison gperf python3 python3-pip \
+            python3-venv cmake ninja-build ccache libffi-dev libssl-dev dfu-util \
+            libusb-1.0-0 ninja-build
+
+      - name: Klonovani ESP-IDF
+        run: |
+          git clone --recursive --depth 1 --branch v5.5.4 https://github.com/espressif/esp-idf.git
+          cd esp-idf
+          ./install.sh esp32c6
+
+      - name: Klonovani ESP-Matter SDK
+        run: |
+          git clone --depth 1 https://github.com/espressif/esp-matter.git
+          cd esp-matter
+          git submodule update --init --depth 1
+          cd connectedhomeip/connectedhomeip
+          ./scripts/checkout_submodules.py --platform esp32 linux --shallow
+          cd ../..
+          source ../esp-idf/export.sh
+          ./install.sh
+
+      - name: Zkopirovani projektu do esp-matter/examples
+        run: |
+          cp -r matter_led_c6 esp-matter/examples/matter_led_c6
+          # workflow soubor uvnitr priklad nepotrebuje
+          rm -rf esp-matter/examples/matter_led_c6/.github
+
+      - name: Sestaveni firmware (ESP32-C6, Matter over Thread)
+        run: |
+          source esp-idf/export.sh
+          export ESP_MATTER_PATH=$GITHUB_WORKSPACE/esp-matter
+          cd esp-matter/examples/matter_led_c6
+          idf.py -DSDKCONFIG_DEFAULTS="sdkconfig.defaults;sdkconfig.defaults.esp32c6_thread" set-target esp32c6
+          idf.py build
+
+      - name: Priprava vystupnich souboru
+        run: |
+          mkdir -p firmware_output
+          cp esp-matter/examples/matter_led_c6/build/matter_led_c6.bin firmware_output/ || true
+          cp esp-matter/examples/matter_led_c6/build/bootloader/bootloader.bin firmware_output/
+          cp esp-matter/examples/matter_led_c6/build/partition_table/partition-table.bin firmware_output/
+          cp esp-matter/examples/matter_led_c6/build/*.bin firmware_output/ 2>/dev/null || true
+          cp esp-matter/examples/matter_led_c6/build/flash_args firmware_output/ || true
+
+      - name: Nahrani firmware jako artifact ke stazeni
+        uses: actions/upload-artifact@v4
+        with:
+          name: matter_led_c6_firmware
+          path: firmware_output/
+          retention-days: 30
