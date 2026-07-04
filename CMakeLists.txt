@@ -46,9 +46,16 @@ include($ENV{IDF_PATH}/tools/cmake/project.cmake)
 include(${ESP_MATTER_PATH}/examples/common/cmake_common/components_include.cmake)
 
 set(EXTRA_COMPONENT_DIRS
+    "${ESP_MATTER_PATH}/examples/common"
     "${MATTER_SDK_PATH}/config/esp32/components"
     "${ESP_MATTER_PATH}/components"
     "${ESP_MATTER_PATH}/device_hal/device"
     ${extra_components_dirs_append})
+
+# app_reset vyzaduje komponentu 'button', kterou nemame (a nepotrebujeme -
+# vlastni tlacitko/factory-reset si resime jinak). Vyloucime ji z buildu,
+# aby nebrzdila zbytek (led_driver aj. komponenty z examples/common
+# potrebujeme, tuhle jednu ne).
+set(EXCLUDE_COMPONENTS "app_reset")
 
 project(matter_led_c6)
