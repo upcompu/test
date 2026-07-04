@@ -1,14 +1,39 @@
 # CMakeLists.txt - kořenový soubor projektu
 # Matter over Thread - ovládání jednobarevného LED pásku na ESP32-C6
 #
-# Struktura odpovídá oficiálním esp-matter příkladům (examples/light,
-# examples/light_switch) - poradi prikazu je dulezite pro spravnou funkci.
+# Struktura a logika výběru zařízení odpovídá přesně oficiálnímu
+# esp-matter příkladu examples/light/CMakeLists.txt (ověřeno v repozitáři
+# espressif/esp-matter). Poradi prikazu je dulezite pro spravnou funkci.
 
-cmake_minimum_required(VERSION 3.16)
+cmake_minimum_required(VERSION 3.5)
 
 if(NOT DEFINED ENV{ESP_MATTER_PATH})
     message(FATAL_ERROR "Please set ESP_MATTER_PATH to the path of esp-matter repo")
-endif()
+endif(NOT DEFINED ENV{ESP_MATTER_PATH})
+
+# Automaticky vybere spravnou referencni desku (device_hal) podle
+# zvoleneho cipu (IDF_TARGET), presne jako to dela oficialni light priklad.
+if(NOT DEFINED ENV{ESP_MATTER_DEVICE_PATH})
+    if("${IDF_TARGET}" STREQUAL "esp32" OR "${IDF_TARGET}" STREQUAL "")
+        set(ENV{ESP_MATTER_DEVICE_PATH} $ENV{ESP_MATTER_PATH}/device_hal/device/esp32_devkit_c)
+    elseif("${IDF_TARGET}" STREQUAL "esp32c3")
+        set(ENV{ESP_MATTER_DEVICE_PATH} $ENV{ESP_MATTER_PATH}/device_hal/device/esp32c3_devkit_m)
+    elseif("${IDF_TARGET}" STREQUAL "esp32c2")
+        set(ENV{ESP_MATTER_DEVICE_PATH} $ENV{ESP_MATTER_PATH}/device_hal/device/esp32c2_devkit_m)
+    elseif("${IDF_TARGET}" STREQUAL "esp32h2")
+        set(ENV{ESP_MATTER_DEVICE_PATH} $ENV{ESP_MATTER_PATH}/device_hal/device/esp32h2_devkit_c)
+    elseif("${IDF_TARGET}" STREQUAL "esp32s3")
+        set(ENV{ESP_MATTER_DEVICE_PATH} $ENV{ESP_MATTER_PATH}/device_hal/device/esp32s3_devkit_c)
+    elseif("${IDF_TARGET}" STREQUAL "esp32c6")
+        set(ENV{ESP_MATTER_DEVICE_PATH} $ENV{ESP_MATTER_PATH}/device_hal/device/esp32c6_devkit_c)
+    elseif("${IDF_TARGET}" STREQUAL "esp32c61")
+        set(ENV{ESP_MATTER_DEVICE_PATH} $ENV{ESP_MATTER_PATH}/device_hal/device/esp32c61_devkit_c)
+    elseif("${IDF_TARGET}" STREQUAL "esp32c5")
+        set(ENV{ESP_MATTER_DEVICE_PATH} $ENV{ESP_MATTER_PATH}/device_hal/device/esp32c5_devkit_c)
+    else()
+        message(FATAL_ERROR "Unsupported IDF_TARGET")
+    endif()
+endif(NOT DEFINED ENV{ESP_MATTER_DEVICE_PATH})
 
 set(PROJECT_VER "1.0")
 set(PROJECT_VER_NUMBER 1)
