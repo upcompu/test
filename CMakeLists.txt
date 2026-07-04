@@ -6,8 +6,15 @@ cmake_minimum_required(VERSION 3.16)
 set(PROJECT_VER "1.0")
 set(PROJECT_VER_NUMBER 1)
 
-# Cesta k esp-matter komponentám (nastavena proměnnou prostředí ESP_MATTER_PATH)
-get_filename_component(ESP_MATTER_PATH "${CMAKE_CURRENT_SOURCE_DIR}/../../.." ABSOLUTE)
+# Cesta k esp-matter komponentám.
+# Pokud je nastavena promenna prostredi ESP_MATTER_PATH (napr. uvnitr
+# oficialniho Docker image espressif/esp-matter), pouzije se ta.
+# Jinak se predpoklada, ze projekt lezi 3 urovne uvnitr esp-matter/examples/.
+if(DEFINED ENV{ESP_MATTER_PATH})
+    set(ESP_MATTER_PATH $ENV{ESP_MATTER_PATH})
+else()
+    get_filename_component(ESP_MATTER_PATH "${CMAKE_CURRENT_SOURCE_DIR}/../../.." ABSOLUTE)
+endif()
 set(EXTRA_COMPONENT_DIRS
     "${ESP_MATTER_PATH}/components"
     "${ESP_MATTER_PATH}/components/esp_matter"
