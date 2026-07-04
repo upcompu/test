@@ -21,7 +21,7 @@ jobs:
             -v ${{ github.workspace }}:/workspace \
             -e ESP_MATTER_PATH=/opt/espressif/esp-matter \
             espressif/esp-matter:release-v1.5_idf_v5.4.1 \
-            bash -c "cd /workspace && idf.py -DSDKCONFIG_DEFAULTS='sdkconfig.defaults;sdkconfig.defaults.esp32c6_thread' set-target esp32c6 && idf.py build"
+            bash -c "source /opt/espressif/esp-matter/export.sh && cd /workspace && idf.py -DSDKCONFIG_DEFAULTS='sdkconfig.defaults;sdkconfig.defaults.esp32c6_thread' set-target esp32c6 && idf.py build"
 
       - name: Priprava vystupnich souboru
         run: |
