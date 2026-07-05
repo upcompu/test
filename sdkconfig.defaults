@@ -6,6 +6,11 @@ CONFIG_IDF_TARGET="esp32c6"
 CONFIG_PARTITION_TABLE_CUSTOM=y
 CONFIG_PARTITION_TABLE_CUSTOM_FILENAME="partitions.csv"
 
+# Velikost flash pameti - vetsina ESP32-C6 vyvojovych desek ma 8MB.
+# Pokud ma tvoje deska jen 4MB, zmen na "4MB" (a preveř, ze se partitions.csv vejde).
+CONFIG_ESPTOOLPY_FLASHSIZE_8MB=y
+CONFIG_ESPTOOLPY_FLASHSIZE="8MB"
+
 # Zaklad Matter
 CONFIG_ENABLE_MATTER_SERVER=y
 CONFIG_ENABLE_CHIP_SHELL=y
