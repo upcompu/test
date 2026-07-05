@@ -87,26 +87,17 @@ extern "C" void app_main()
 {
     esp_err_t err = ESP_OK;
 
-    /* Inicializace NVS - Matter potrebuje pro ulozeni parovacich dat */
+    /* Inicializace NVS - Matter i OpenThread potrebuji pro ulozeni dat.
+     * Pouziva se standardni "nvs" partition (ne vlastni "ot_storage") -
+     * nvs_flash_init_partition() vyzaduje partition se subtype NVS (0x02),
+     * ale nase "ot_storage" ma vlastni subtype 0x99, takze by selhala
+     * s ESP_ERR_NOT_FOUND (0x105). Standardni "nvs" partition tohle nema. */
     err = nvs_flash_init();
     if (err == ESP_ERR_NVS_NO_FREE_PAGES || err == ESP_ERR_NVS_NEW_VERSION_FOUND) {
         ESP_ERROR_CHECK(nvs_flash_erase());
         err = nvs_flash_init();
     }
     ESP_ERROR_CHECK(err);
-
-    /* Inicializace "ot_storage" partition jako NVS uloziste - novejsi verze
-     * OpenThread settings modulu (esp_openthread_settings.c) to vyzaduje
-     * formalne inicializovane, jinak selze s ESP_ERR_NVS_PART_NOT_FOUND (0x110f)
-     * a firmware spadne na assert(otPlatSettingsInit). */
-#if CONFIG_OPENTHREAD_ENABLED
-    err = nvs_flash_init_partition("ot_storage");
-    if (err == ESP_ERR_NVS_NO_FREE_PAGES || err == ESP_ERR_NVS_NEW_VERSION_FOUND) {
-        ESP_ERROR_CHECK(nvs_flash_erase_partition("ot_storage"));
-        err = nvs_flash_init_partition("ot_storage");
-    }
-    ESP_ERROR_CHECK(err);
-#endif
 
     /* Inicializace hardwaroveho driveru LED pasku (LEDC PWM) */
     s_light_handle = app_driver_light_init();
@@ -148,7 +139,7 @@ extern "C" void app_main()
     esp_openthread_platform_config_t ot_config = {};
     ot_config.radio_config.radio_mode = RADIO_MODE_NATIVE;
     ot_config.host_config.host_connection_mode = HOST_CONNECTION_MODE_NONE;
-    ot_config.port_config.storage_partition_name = "ot_storage";
+    ot_config.port_config.storage_partition_name = "nvs";
     ot_config.port_config.netif_queue_size = 10;
     ot_config.port_config.task_queue_size = 10;
     set_openthread_platform_config(&ot_config);
