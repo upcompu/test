@@ -1,9 +1,5 @@
 # CMakeLists.txt - kořenový soubor projektu
 # Matter over Thread - ovládání jednobarevného LED pásku na ESP32-C6
-#
-# Struktura a logika výběru zařízení odpovídá přesně oficiálnímu
-# esp-matter příkladu examples/light/CMakeLists.txt (ověřeno v repozitáři
-# espressif/esp-matter). Poradi prikazu je dulezite pro spravnou funkci.
 
 cmake_minimum_required(VERSION 3.5)
 
@@ -11,8 +7,6 @@ if(NOT DEFINED ENV{ESP_MATTER_PATH})
     message(FATAL_ERROR "Please set ESP_MATTER_PATH to the path of esp-matter repo")
 endif(NOT DEFINED ENV{ESP_MATTER_PATH})
 
-# Automaticky vybere spravnou referencni desku (device_hal) podle
-# zvoleneho cipu (IDF_TARGET), presne jako to dela oficialni light priklad.
 if(NOT DEFINED ENV{ESP_MATTER_DEVICE_PATH})
     if("${IDF_TARGET}" STREQUAL "esp32" OR "${IDF_TARGET}" STREQUAL "")
         set(ENV{ESP_MATTER_DEVICE_PATH} $ENV{ESP_MATTER_PATH}/device_hal/device/esp32_devkit_c)
@@ -41,7 +35,6 @@ set(PROJECT_VER_NUMBER 1)
 set(ESP_MATTER_PATH $ENV{ESP_MATTER_PATH})
 set(MATTER_SDK_PATH ${ESP_MATTER_PATH}/connectedhomeip/connectedhomeip)
 
-# Toto musi byt provedeno pred pouzitim promenne IDF_TARGET
 include($ENV{IDF_PATH}/tools/cmake/project.cmake)
 include(${ESP_MATTER_PATH}/examples/common/cmake_common/components_include.cmake)
 
@@ -50,12 +43,9 @@ set(EXTRA_COMPONENT_DIRS
     "${MATTER_SDK_PATH}/config/esp32/components"
     "${ESP_MATTER_PATH}/components"
     "${ESP_MATTER_PATH}/device_hal"
+    "${ESP_MATTER_PATH}/device_hal/button_driver"
     ${extra_components_dirs_append})
 
-# app_reset vyzaduje komponentu 'button', kterou nemame (a nepotrebujeme -
-# vlastni tlacitko/factory-reset si resime jinak). Vyloucime ji z buildu,
-# aby nebrzdila zbytek (led_driver aj. komponenty z examples/common
-# potrebujeme, tuhle jednu ne).
 set(EXCLUDE_COMPONENTS "app_reset")
 
 project(matter_led_c6)
