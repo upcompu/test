@@ -13,7 +13,7 @@ typedef void *app_driver_handle_t;
 
 /* GPIO, na který je připojen (přes MOSFET/tranzistor) jednobarevný LED pásek.
  * Uprav podle svého zapojení. */
-#define LED_STRIP_GPIO          8
+#define LED_STRIP_GPIO          10
 
 /* LEDC nastavení pro PWM stmívání */
 #define LED_LEDC_TIMER          LEDC_TIMER_0
