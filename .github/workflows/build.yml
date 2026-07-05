@@ -1,7 +1,5 @@
 name: Build Matter LED firmware (ESP32-C6, Thread)
 
-# Spustí se automaticky při každém pushnutí do repozitáře,
-# nebo ručně přes záložku "Actions" -> "Run workflow"
 on:
   push:
   workflow_dispatch:
@@ -22,6 +20,7 @@ jobs:
             bash -c "grep -n 's_platform_config\\s*=' /opt/espressif/esp-matter/connectedhomeip/connectedhomeip/config/esp32/third_party/connectedhomeip/src/platform/ESP32/OpenthreadLauncher.cpp && echo '=== FUNKCE OKOLO PRIRAZENI ===' && grep -n -B 15 -A 5 's_platform_config = ' /opt/espressif/esp-matter/connectedhomeip/connectedhomeip/config/esp32/third_party/connectedhomeip/src/platform/ESP32/OpenthreadLauncher.cpp"
 
       - name: Sestaveni pres oficialni Docker image espressif/esp-matter
+        if: false  # DOCASNE VYPNUTO behem diagnostiky, ať kazdy pokus netrva 12 min
         run: |
           docker run --rm \
             -v ${{ github.workspace }}:/workspace \
@@ -30,6 +29,7 @@ jobs:
             bash -c "source /opt/espressif/esp-matter/export.sh && cd /workspace && idf.py -DSDKCONFIG_DEFAULTS='sdkconfig.defaults;sdkconfig.defaults.esp32c6_thread' set-target esp32c6 && idf.py build"
 
       - name: Priprava vystupnich souboru
+        if: false  # DOCASNE VYPNUTO - neni co pripravovat, kdyz se nesestavuje
         run: |
           mkdir -p firmware_output
           cp build/matter_led_c6.bin firmware_output/ 2>/dev/null || cp build/*.bin firmware_output/ 2>/dev/null || true
@@ -39,6 +39,7 @@ jobs:
           ls -la firmware_output/
 
       - name: Nahrani firmware jako artifact ke stazeni
+        if: false  # DOCASNE VYPNUTO
         uses: actions/upload-artifact@v4
         with:
           name: matter_led_c6_firmware
