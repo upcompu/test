@@ -15,6 +15,9 @@
 
 #include <app/server/CommissioningWindowManager.h>
 #include <app/server/Server.h>
+#if CONFIG_OPENTHREAD_ENABLED
+#include <platform/ESP32/OpenthreadLauncher.h>
+#endif
 
 #if CONFIG_ENABLE_CHIP_SHELL
 #include <esp_matter_console.h>
@@ -119,6 +122,18 @@ extern "C" void app_main()
 #if CONFIG_ENABLE_OTA_REQUESTOR
     ota_requestor::config_t ota_config;
     endpoint_t *ota_endpoint = ota_requestor::create(node, &ota_config, ENDPOINT_FLAG_NONE, nullptr);
+#endif
+
+    /* Nastaveni OpenThread platform konfigurace - MUSI se zavolat pred
+     * esp_matter::start(), jinak interni s_platform_config zustane NULL
+     * a firmware pri startu Thread stacku spadne na assert(s_platform_config). */
+#if CONFIG_OPENTHREAD_ENABLED
+    esp_openthread_platform_config_t ot_config = {
+        .radio_config = ESP_OPENTHREAD_DEFAULT_RADIO_CONFIG(),
+        .host_config = ESP_OPENTHREAD_DEFAULT_HOST_CONFIG(),
+        .port_config = ESP_OPENTHREAD_DEFAULT_PORT_CONFIG(),
+    };
+    set_openthread_platform_config(&ot_config);
 #endif
 
     /* Spusteni Matter stacku (vcetne OpenThread pro Thread transport) */
