@@ -31,7 +31,7 @@ jobs:
               ./scripts/checkout_submodules.py --platform esp32 linux --shallow &&
               cd /opt/esp-matter &&
               echo '=== Instalace esp-matter (muze trvat dlouho - kompiluje chip-tool atd.) ===' &&
-              ./install.sh esp32c6 &&
+              ./install.sh &&
               echo '=== Aktivace prostredi a build naseho projektu ===' &&
               source /opt/esp-idf/export.sh &&
               source /opt/esp-matter/export.sh &&
