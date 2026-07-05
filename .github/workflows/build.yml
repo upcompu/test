@@ -29,7 +29,7 @@ jobs:
               ./scripts/checkout_submodules.py --platform esp32 linux --shallow &&
               cd /opt/esp-matter &&
               echo '=== Instalace chybejicich systemovych knihoven ===' &&
-              apt-get update && apt-get install -y libffi-dev libssl-dev python3-dev build-essential pkg-config &&
+              apt-get update && apt-get install -y libffi-dev libssl-dev python3-dev build-essential pkg-config libglib2.0-dev libdbus-1-dev &&
               echo '=== Instalace esp-matter (muze trvat dlouho - kompiluje chip-tool atd.) ===' &&
               ./install.sh &&
               echo '=== Aktivace prostredi a build naseho projektu ===' &&
