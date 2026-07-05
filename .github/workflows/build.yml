@@ -1,4 +1,4 @@
-name: Build Matter LED firmware (ESP32-C6, Thread)
+name: Build Matter LED firmware (ESP32-C6, Thread) - cerstvy ESP-IDF v5.5.4 + esp-matter main
 
 on:
   push:
@@ -7,19 +7,39 @@ on:
 jobs:
   build:
     runs-on: ubuntu-22.04
-    timeout-minutes: 60
+    # Cerstvy build esp-matter (kompiluje vlastni host nastroje jako chip-tool)
+    # muze trvat velmi dlouho, zejmena napoprve. Davame velkou rezervu.
+    timeout-minutes: 180
 
     steps:
       - name: Checkout projektu
         uses: actions/checkout@v4
 
-      - name: Sestaveni pres oficialni Docker image espressif/esp-matter
+      - name: Sestaveni s cerstvym ESP-IDF v5.5.4 + esp-matter main branch
         run: |
           docker run --rm \
             -v ${{ github.workspace }}:/workspace \
-            -e ESP_MATTER_PATH=/opt/espressif/esp-matter \
-            espressif/esp-matter:release-v1.5_idf_v5.4.1 \
-            bash -c "source /opt/espressif/esp-matter/export.sh && cd /workspace && idf.py -DSDKCONFIG_DEFAULTS='sdkconfig.defaults;sdkconfig.defaults.esp32c6_thread' set-target esp32c6 && idf.py build"
+            espressif/idf:v5.5.4 \
+            bash -c "
+              set -e
+              echo '=== Klonovani esp-matter (shallow) ===' &&
+              git clone --depth 1 https://github.com/espressif/esp-matter.git /opt/esp-matter &&
+              cd /opt/esp-matter &&
+              git submodule update --init --depth 1 &&
+              echo '=== Klonovani connectedhomeip submodulu (shallow, jen esp32/linux) ===' &&
+              cd connectedhomeip/connectedhomeip &&
+              ./scripts/checkout_submodules.py --platform esp32 linux --shallow &&
+              cd /opt/esp-matter &&
+              echo '=== Instalace esp-matter (muze trvat dlouho - kompiluje chip-tool atd.) ===' &&
+              ./install.sh esp32c6 &&
+              echo '=== Aktivace prostredi a build naseho projektu ===' &&
+              source /opt/esp-idf/export.sh &&
+              source /opt/esp-matter/export.sh &&
+              export ESP_MATTER_PATH=/opt/esp-matter &&
+              cd /workspace &&
+              idf.py -DSDKCONFIG_DEFAULTS='sdkconfig.defaults;sdkconfig.defaults.esp32c6_thread' set-target esp32c6 &&
+              idf.py build
+            "
 
       - name: Priprava vystupnich souboru
         run: |
