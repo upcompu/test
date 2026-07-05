@@ -1,5 +1,7 @@
 name: Build Matter LED firmware (ESP32-C6, Thread)
 
+# Spustí se automaticky při každém pushnutí do repozitáře,
+# nebo ručně přes záložku "Actions" -> "Run workflow"
 on:
   push:
   workflow_dispatch:
@@ -13,11 +15,11 @@ jobs:
       - name: Checkout projektu
         uses: actions/checkout@v4
 
-      - name: Diagnostika - zdrojovy kod OpenthreadLauncher.cpp kolem radku 263
+      - name: Diagnostika - kdo nastavuje s_platform_config
         run: |
           docker run --rm \
             espressif/esp-matter:release-v1.5_idf_v5.4.1 \
-            bash -c "sed -n '1,50p;230,290p' /opt/espressif/esp-matter/connectedhomeip/connectedhomeip/config/esp32/third_party/connectedhomeip/src/platform/ESP32/OpenthreadLauncher.cpp"
+            bash -c "grep -n 's_platform_config\\s*=' /opt/espressif/esp-matter/connectedhomeip/connectedhomeip/config/esp32/third_party/connectedhomeip/src/platform/ESP32/OpenthreadLauncher.cpp && echo '=== FUNKCE OKOLO PRIRAZENI ===' && grep -n -B 15 -A 5 's_platform_config = ' /opt/espressif/esp-matter/connectedhomeip/connectedhomeip/config/esp32/third_party/connectedhomeip/src/platform/ESP32/OpenthreadLauncher.cpp"
 
       - name: Sestaveni pres oficialni Docker image espressif/esp-matter
         run: |
