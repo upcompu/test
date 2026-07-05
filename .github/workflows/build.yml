@@ -28,8 +28,8 @@ jobs:
               cd connectedhomeip/connectedhomeip &&
               ./scripts/checkout_submodules.py --platform esp32 linux --shallow &&
               cd /opt/esp-matter &&
-              echo '=== Instalace VSECH oficialnich zavislosti najednou (dle connectedhomeip BUILDING.md) ===' &&
-              apt-get update && apt-get install -y git gcc g++ pkg-config libssl-dev libdbus-1-dev libglib2.0-dev libavahi-client-dev ninja-build python3-venv python3-dev python3-pip unzip libgirepository1.0-dev libcairo2-dev libreadline-dev libffi-dev build-essential &&
+              echo '=== Instalace vsech systemovych zavislosti ===' &&
+              apt-get update && apt-get install -y git gcc g++ pkg-config libssl-dev libdbus-1-dev libglib2.0-dev libavahi-client-dev ninja-build python3-venv python3-dev python3-pip unzip libgirepository1.0-dev libcairo2-dev libreadline-dev libffi-dev build-essential libevent-dev &&
               echo '=== Instalace esp-matter (muze trvat dlouho - kompiluje chip-tool atd.) ===' &&
               ./install.sh &&
               echo '=== Aktivace prostredi a build naseho projektu ===' &&
