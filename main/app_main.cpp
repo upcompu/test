@@ -15,6 +15,8 @@
 
 #include <app/server/CommissioningWindowManager.h>
 #include <app/server/Server.h>
+#include <setup_payload/OnboardingCodesUtil.h>
+
 #if CONFIG_OPENTHREAD_ENABLED
 #include <platform/ESP32/OpenthreadLauncher.h>
 #endif
@@ -152,6 +154,10 @@ extern "C" void app_main()
     esp_matter::console::factoryreset_register_commands();
     esp_matter::console::init();
 #endif
+
+    /* Explicitne vypsat QR kod a rucni parovaci kod do konzole - nespolehame
+     * na automaticke chovani SDK, protoze se u nasi konfigurace nevypsalo. */
+    PrintOnboardingCodes(chip::RendezvousInformationFlags(chip::RendezvousInformationFlag::kBLE));
 
     ESP_LOGI(TAG, "Matter over Thread zarizeni (LED pasek) pripraveno k parovani");
 }
