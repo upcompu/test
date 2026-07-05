@@ -7,8 +7,6 @@ on:
 jobs:
   build:
     runs-on: ubuntu-22.04
-    # Cerstvy build esp-matter (kompiluje vlastni host nastroje jako chip-tool)
-    # muze trvat velmi dlouho, zejmena napoprve. Davame velkou rezervu.
     timeout-minutes: 180
 
     steps:
@@ -30,8 +28,8 @@ jobs:
               cd connectedhomeip/connectedhomeip &&
               ./scripts/checkout_submodules.py --platform esp32 linux --shallow &&
               cd /opt/esp-matter &&
-              echo '=== Instalace chybejicich systemovych knihoven (libffi-dev pro cffi) ===' &&
-              apt-get update && apt-get install -y libffi-dev libssl-dev python3-dev build-essential &&
+              echo '=== Instalace chybejicich systemovych knihoven ===' &&
+              apt-get update && apt-get install -y libffi-dev libssl-dev python3-dev build-essential pkg-config &&
               echo '=== Instalace esp-matter (muze trvat dlouho - kompiluje chip-tool atd.) ===' &&
               ./install.sh &&
               echo '=== Aktivace prostredi a build naseho projektu ===' &&
