@@ -95,6 +95,19 @@ extern "C" void app_main()
     }
     ESP_ERROR_CHECK(err);
 
+    /* Inicializace "ot_storage" partition jako NVS uloziste - novejsi verze
+     * OpenThread settings modulu (esp_openthread_settings.c) to vyzaduje
+     * formalne inicializovane, jinak selze s ESP_ERR_NVS_PART_NOT_FOUND (0x110f)
+     * a firmware spadne na assert(otPlatSettingsInit). */
+#if CONFIG_OPENTHREAD_ENABLED
+    err = nvs_flash_init_partition("ot_storage");
+    if (err == ESP_ERR_NVS_NO_FREE_PAGES || err == ESP_ERR_NVS_NEW_VERSION_FOUND) {
+        ESP_ERROR_CHECK(nvs_flash_erase_partition("ot_storage"));
+        err = nvs_flash_init_partition("ot_storage");
+    }
+    ESP_ERROR_CHECK(err);
+#endif
+
     /* Inicializace hardwaroveho driveru LED pasku (LEDC PWM) */
     s_light_handle = app_driver_light_init();
 
