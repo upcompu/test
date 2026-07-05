@@ -33,7 +33,8 @@ jobs:
               echo '=== Instalace esp-matter (muze trvat dlouho - kompiluje chip-tool atd.) ===' &&
               ./install.sh &&
               echo '=== Aktivace prostredi a build naseho projektu ===' &&
-              source /opt/esp-idf/export.sh &&
+              echo \"IDF_PATH je: \$IDF_PATH\" &&
+              source \$IDF_PATH/export.sh &&
               source /opt/esp-matter/export.sh &&
               export ESP_MATTER_PATH=/opt/esp-matter &&
               cd /workspace &&
