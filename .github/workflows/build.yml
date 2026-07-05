@@ -1,7 +1,5 @@
 name: Build Matter LED firmware (ESP32-C6, Thread)
 
-# Spustí se automaticky při každém pushnutí do repozitáře,
-# nebo ručně přes záložku "Actions" -> "Run workflow"
 on:
   push:
   workflow_dispatch:
@@ -15,12 +13,11 @@ jobs:
       - name: Checkout projektu
         uses: actions/checkout@v4
 
-      - name: Diagnostika - kontrola obsahu repozitare
+      - name: Diagnostika - zdrojovy kod OpenthreadLauncher.cpp kolem radku 263
         run: |
-          echo "=== Obsah slozky main/ ==="
-          ls -la main/
-          echo "=== Obsah main/idf_component.yml (pokud existuje) ==="
-          cat main/idf_component.yml || echo "SOUBOR main/idf_component.yml NEEXISTUJE"
+          docker run --rm \
+            espressif/esp-matter:release-v1.5_idf_v5.4.1 \
+            bash -c "sed -n '1,50p;230,290p' /opt/espressif/esp-matter/connectedhomeip/connectedhomeip/config/esp32/third_party/connectedhomeip/src/platform/ESP32/OpenthreadLauncher.cpp"
 
       - name: Sestaveni pres oficialni Docker image espressif/esp-matter
         run: |
