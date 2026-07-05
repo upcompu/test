@@ -126,13 +126,16 @@ extern "C" void app_main()
 
     /* Nastaveni OpenThread platform konfigurace - MUSI se zavolat pred
      * esp_matter::start(), jinak interni s_platform_config zustane NULL
-     * a firmware pri startu Thread stacku spadne na assert(s_platform_config). */
+     * a firmware pri startu Thread stacku spadne na assert(s_platform_config).
+     * Makra ESP_OPENTHREAD_DEFAULT_*_CONFIG() nejsou soucasti SDK (kazdy
+     * priklad si je definuje sam v esp_ot_config.h), proto pisme rucne. */
 #if CONFIG_OPENTHREAD_ENABLED
-    esp_openthread_platform_config_t ot_config = {
-        .radio_config = ESP_OPENTHREAD_DEFAULT_RADIO_CONFIG(),
-        .host_config = ESP_OPENTHREAD_DEFAULT_HOST_CONFIG(),
-        .port_config = ESP_OPENTHREAD_DEFAULT_PORT_CONFIG(),
-    };
+    esp_openthread_platform_config_t ot_config = {};
+    ot_config.radio_config.radio_mode = RADIO_MODE_NATIVE;
+    ot_config.host_config.host_connection_mode = HOST_CONNECTION_MODE_NONE;
+    ot_config.port_config.storage_partition_name = "ot_storage";
+    ot_config.port_config.netif_queue_size = 10;
+    ot_config.port_config.task_queue_size = 10;
     set_openthread_platform_config(&ot_config);
 #endif
 
