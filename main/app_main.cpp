@@ -104,9 +104,7 @@ extern "C" void app_main()
     /* Vytvoreni endpointu typu "Dimmable Light" (on/off + level control) */
     dimmable_light::config_t light_config;
     light_config.on_off.on_off = DEFAULT_POWER;
-    light_config.on_off.lighting.start_up_on_off = nullptr;
     light_config.level_control.current_level = DEFAULT_BRIGHTNESS;
-    light_config.level_control.lighting.start_up_current_level = DEFAULT_BRIGHTNESS;
 
     endpoint_t *light_endpoint = dimmable_light::create(node, &light_config, ENDPOINT_FLAG_NONE, s_light_handle);
     if (!light_endpoint) {
