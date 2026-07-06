@@ -37,6 +37,13 @@ static led_strip_ctx_t s_led_ctx = {
     .brightness = DEFAULT_BRIGHTNESS,
 };
 
+/* Doba (v ms) hardwaroveho "fade" prechodu mezi soucasnym a novym duty
+ * cyklem. Reseni bliknuti pri zapnuti/prepnuti - misto okamziteho skoku
+ * z 0 na cilovou hodnotu LEDC hardwarove plynule "najede" na novou hodnotu,
+ * coz eliminuje vizualni cvaknuti/bliknuti a navic vypada esteticky lepe
+ * (jemne rozsviceni misto tvrdeho skoku). */
+#define LED_FADE_TIME_MS    200
+
 /* Gamma korekce pro linearni vnimani jasu lidskym okem.
  * Lidske oko vnima jas logaritmicky, ne linearne - primy linearni prevod
  * Matter urovne (0-254) na PWM duty cyklus zpusobuje, ze pri 50% Matter
@@ -44,7 +51,16 @@ static led_strip_ctx_t s_led_ctx = {
  * 70-80% vnimaneho jasu), a teprve blizko 0% jas rychle klesa. Standardni
  * reseni je aplikovat mocninnou (gamma) korekci na vstupni hodnotu pred
  * prevodem na PWM duty. Gamma ~2.2 je bezny, dobre osvedceny kompromis. */
-#define LED_GAMMA   2.2f
+#define LED_GAMMA       2.2f
+
+/* Minimalni "podlaha" PWM duty cyklu (jako zlomek max_duty), pod kterou
+ * nikdy nejdeme, pokud je svetlo zapnute. Bez tohohle by gamma korekce
+ * pri nizkem jasu (napr. 5%) vytvorila extremne kratky impuls (< 1 mikrosekunda
+ * pri nasi frekvenci 5kHz), ktery levny MOSFET modul nestiha spolehlive
+ * zpracovat a vysledkem je viditelne blikani. S podlahou 5% mame jistotu
+ * dostatecne dlouheho impulsu pro spolehlive spinani, a zbytek rozsahu jasu
+ * (5%-100%) se namapuje s gamma korekci nad tuto podlahu. */
+#define LED_MIN_DUTY_FRACTION   0.05f
 
 /* Přepočet Matter úrovně (0-254) na LEDC duty (0-1023) s ohledem na power.
  *
@@ -64,22 +80,37 @@ static uint32_t compute_duty(bool power, uint8_t brightness)
 
     uint32_t max_duty = (1 << LED_LEDC_DUTY_RES) - 1; /* 1023 pro 10 bit */
 
+    if (brightness == 0) {
+        /* Svetlo "zapnute", ale s nulovym jasem z ovladace - drzime aspon
+         * minimalni podlahu, ať pasek uplne nezhasne pri "on" s brightness=0. */
+        return (uint32_t)(LED_MIN_DUTY_FRACTION * (float)max_duty);
+    }
+
     /* Normalizace na rozsah 0.0 - 1.0 */
     float linear_fraction = (float)brightness / 254.0f;
 
     /* Gamma korekce - mocninna krivka misto primeho linearniho prevodu */
     float corrected_fraction = powf(linear_fraction, LED_GAMMA);
 
-    uint32_t duty = (uint32_t)(corrected_fraction * (float)max_duty);
+    /* Namapovani vysledku nad minimalni podlahu, aby zadny impuls nebyl
+     * prilis kratky pro spolehlive spinani modulu. */
+    float final_fraction = LED_MIN_DUTY_FRACTION +
+                            (1.0f - LED_MIN_DUTY_FRACTION) * corrected_fraction;
+
+    uint32_t duty = (uint32_t)(final_fraction * (float)max_duty);
 
     return duty;
 }
 
+/* Aplikace noveho duty cyklu s hardwarovym plynulym prechodem (fade),
+ * misto okamziteho skoku - eliminuje bliknuti/cvaknuti pri zmene stavu. */
 static void ledc_apply(void)
 {
     uint32_t duty = compute_duty(s_led_ctx.power, s_led_ctx.brightness);
-    ledc_set_duty(LED_LEDC_MODE, LED_LEDC_CHANNEL, duty);
-    ledc_update_duty(LED_LEDC_MODE, LED_LEDC_CHANNEL);
+
+    ledc_set_fade_with_time(LED_LEDC_MODE, LED_LEDC_CHANNEL, duty, LED_FADE_TIME_MS);
+    ledc_fade_start(LED_LEDC_MODE, LED_LEDC_CHANNEL, LEDC_FADE_NO_WAIT);
+
     ESP_LOGI(TAG, "LED strip: power=%d brightness=%d -> duty=%" PRIu32,
              s_led_ctx.power, s_led_ctx.brightness, duty);
 }
@@ -102,6 +133,9 @@ app_driver_handle_t app_driver_light_init(void)
     ch_cfg.duty       = 0;
     ch_cfg.hpoint     = 0;
     ESP_ERROR_CHECK(ledc_channel_config(&ch_cfg));
+
+    /* Nutne pro pouziti ledc_set_fade_with_time() / ledc_fade_start() */
+    ESP_ERROR_CHECK(ledc_fade_func_install(0));
 
     ledc_apply();
 
