@@ -12,10 +12,13 @@
  *   (+) LED pásku  -> +12V/+24V přímo ze zdroje
  *   GND zdroje LED pásku propojit s GND ESP32-C6
  */
+
 #include <esp_log.h>
+#include <math.h>
 #include <driver/ledc.h>
 #include <esp_matter.h>
 #include <esp_matter_attribute_utils.h>
+
 #include "app_priv.h"
 
 static const char *TAG = "app_driver";
@@ -34,6 +37,15 @@ static led_strip_ctx_t s_led_ctx = {
     .brightness = DEFAULT_BRIGHTNESS,
 };
 
+/* Gamma korekce pro linearni vnimani jasu lidskym okem.
+ * Lidske oko vnima jas logaritmicky, ne linearne - primy linearni prevod
+ * Matter urovne (0-254) na PWM duty cyklus zpusobuje, ze pri 50% Matter
+ * urovne vypada pasek subjektivne mnohem jasnejsi nez "poloviste" (typicky
+ * 70-80% vnimaneho jasu), a teprve blizko 0% jas rychle klesa. Standardni
+ * reseni je aplikovat mocninnou (gamma) korekci na vstupni hodnotu pred
+ * prevodem na PWM duty. Gamma ~2.2 je bezny, dobre osvedceny kompromis. */
+#define LED_GAMMA   2.2f
+
 /* Přepočet Matter úrovně (0-254) na LEDC duty (0-1023) s ohledem na power.
  *
  * POZNAMKA K HISTORII: puvodne jsme se domnivali, ze MOSFET modul ma
@@ -49,8 +61,17 @@ static uint32_t compute_duty(bool power, uint8_t brightness)
     if (!power) {
         return 0;
     }
+
     uint32_t max_duty = (1 << LED_LEDC_DUTY_RES) - 1; /* 1023 pro 10 bit */
-    uint32_t duty = (uint32_t)brightness * max_duty / 254;
+
+    /* Normalizace na rozsah 0.0 - 1.0 */
+    float linear_fraction = (float)brightness / 254.0f;
+
+    /* Gamma korekce - mocninna krivka misto primeho linearniho prevodu */
+    float corrected_fraction = powf(linear_fraction, LED_GAMMA);
+
+    uint32_t duty = (uint32_t)(corrected_fraction * (float)max_duty);
+
     return duty;
 }
 
@@ -77,3 +98,53 @@ app_driver_handle_t app_driver_light_init(void)
     ch_cfg.gpio_num   = LED_STRIP_GPIO;
     ch_cfg.speed_mode = LED_LEDC_MODE;
     ch_cfg.channel    = LED_LEDC_CHANNEL;
+    ch_cfg.timer_sel  = LED_LEDC_TIMER;
+    ch_cfg.duty       = 0;
+    ch_cfg.hpoint     = 0;
+    ESP_ERROR_CHECK(ledc_channel_config(&ch_cfg));
+
+    ledc_apply();
+
+    return (app_driver_handle_t)&s_led_ctx;
+}
+
+esp_err_t app_driver_light_set_power(app_driver_handle_t handle, bool power)
+{
+    s_led_ctx.power = power;
+    ledc_apply();
+    return ESP_OK;
+}
+
+esp_err_t app_driver_light_set_brightness(app_driver_handle_t handle, uint8_t brightness)
+{
+    s_led_ctx.brightness = brightness;
+    ledc_apply();
+    return ESP_OK;
+}
+
+/*
+ * Tato funkce se volá z app_main.cpp při každé změně atributu přijaté
+ * z Matter fabric (např. z Apple Home / Google Home / Home Assistant
+ * přes Thread Border Router).
+ */
+esp_err_t app_driver_attribute_update(app_driver_handle_t driver_handle,
+                                       uint16_t endpoint_id,
+                                       uint32_t cluster_id,
+                                       uint32_t attribute_id,
+                                       void *val_ptr)
+{
+    esp_err_t err = ESP_OK;
+    esp_matter_attr_val_t *val = (esp_matter_attr_val_t *)val_ptr;
+
+    if (cluster_id == chip::app::Clusters::OnOff::Id) {
+        if (attribute_id == chip::app::Clusters::OnOff::Attributes::OnOff::Id) {
+            err = app_driver_light_set_power(driver_handle, val->val.b);
+        }
+    } else if (cluster_id == chip::app::Clusters::LevelControl::Id) {
+        if (attribute_id == chip::app::Clusters::LevelControl::Attributes::CurrentLevel::Id) {
+            err = app_driver_light_set_brightness(driver_handle, val->val.u8);
+        }
+    }
+
+    return err;
+}
