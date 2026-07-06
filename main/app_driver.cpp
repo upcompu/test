@@ -26,14 +26,24 @@ static const char *TAG = "app_driver";
 using namespace esp_matter;
 using namespace esp_matter::attribute;
 
-/* Interní stav driveru */
+/* Interní stav driveru.
+ *
+ * DULEZITE: power se VZDY inicializuje jako "false" (vypnuto), bez ohledu
+ * na DEFAULT_POWER makro (to se pouziva jen pro pocatecni hodnotu Matter
+ * atributu v app_main.cpp, ne pro hardware). Duvod: pokud by se hardware
+ * hned pri startu rozsvitil (DEFAULT_POWER=true) a Matter/ZCL vzapeti
+ * podle ulozene "StartUpOnOff" preference svetlo zase vypnul, dochazelo
+ * by k viditelnemu bliknuti (vypnuto->zapnuto->vypnuto behem par ms) -
+ * presne to, co bylo pozorovano. Zacit vzdy z bezpecneho "vypnuto" stavu
+ * a nechat Matter/ZCL nastavit spravny stav podle ulozene preference
+ * eliminuje tohle bliknuti uplne. */
 typedef struct {
     bool power;
     uint8_t brightness; /* 0-254 dle Matter Level Control */
 } led_strip_ctx_t;
 
 static led_strip_ctx_t s_led_ctx = {
-    .power = DEFAULT_POWER,
+    .power = false,
     .brightness = DEFAULT_BRIGHTNESS,
 };
 
