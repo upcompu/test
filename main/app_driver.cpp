@@ -16,6 +16,7 @@
 #include <esp_log.h>
 #include <math.h>
 #include <driver/ledc.h>
+#include <esp_timer.h>
 #include <esp_matter.h>
 #include <esp_matter_attribute_utils.h>
 
@@ -53,6 +54,20 @@ static led_strip_ctx_t s_led_ctx = {
  * coz eliminuje vizualni cvaknuti/bliknuti a navic vypada esteticky lepe
  * (jemne rozsviceni misto tvrdeho skoku). */
 #define LED_FADE_TIME_MS    200
+
+/* DEBOUNCE - reseni tranzientni "min-level" mezihodnoty:
+ * Matter/ZCL Level Control cluster pri prikazu "zapnout" standardne (dle
+ * specifikace) posle NEKOLIK po sobe jdoucich zmen urovne - napr. nejdriv
+ * cilovou hodnotu, pak kratce minimum (brightness=1), pak zase cilovou
+ * hodnotu. Bez filtrace by kazda z techto zmen okamzite sla na hardware,
+ * coz zpusobuje viditelne "skubnuti/bliknuti" i s fade efektem (fade
+ * nestihne dobehnout, nez prijde dalsi prikaz). Reseni: pockame kratkou
+ * dobu (DEBOUNCE_MS) po kazde zadosti o zmenu - pokud behem ni prijde
+ * dalsi zmena, predchozi se zrusi a ceka se znovu. Na hardware se tak
+ * aplikuje jen POSLEDNI hodnota z rychleho sledu prikazu. */
+#define LED_DEBOUNCE_MS     180
+
+static esp_timer_handle_t s_debounce_timer = nullptr;
 
 /* Gamma korekce pro linearni vnimani jasu lidskym okem.
  * Lidske oko vnima jas logaritmicky, ne linearne - primy linearni prevod
@@ -113,7 +128,8 @@ static uint32_t compute_duty(bool power, uint8_t brightness)
 }
 
 /* Aplikace noveho duty cyklu s hardwarovym plynulym prechodem (fade),
- * misto okamziteho skoku - eliminuje bliknuti/cvaknuti pri zmene stavu. */
+ * misto okamziteho skoku - eliminuje bliknuti/cvaknuti pri zmene stavu.
+ * Tohle je "skutecne" volane az po uplynuti debounce doby (viz nize). */
 static void ledc_apply(void)
 {
     uint32_t duty = compute_duty(s_led_ctx.power, s_led_ctx.brightness);
@@ -123,6 +139,35 @@ static void ledc_apply(void)
 
     ESP_LOGI(TAG, "LED strip: power=%d brightness=%d -> duty=%" PRIu32,
              s_led_ctx.power, s_led_ctx.brightness, duty);
+}
+
+/* Callback debounce timeru - zavola se az kdyz po LED_DEBOUNCE_MS
+ * neprisla zadna dalsi zmena (viz schedule_apply nize). */
+static void debounce_timer_cb(void *arg)
+{
+    ledc_apply();
+}
+
+/* Naplanuje aplikaci aktualniho stavu (s_led_ctx) na hardware az po
+ * uplynuti debounce doby. Pokud prijde dalsi pozadavek drive, predchozi
+ * casovac se zrusi a ceka se znovu - na hardware se tak dostane jen
+ * posledni hodnota z rychleho sledu prikazu od Matter/ZCL vrstvy. */
+static void schedule_apply(void)
+{
+    if (s_debounce_timer == nullptr) {
+        const esp_timer_create_args_t timer_args = {
+            .callback = &debounce_timer_cb,
+            .arg = nullptr,
+            .dispatch_method = ESP_TIMER_TASK,
+            .name = "led_debounce",
+        };
+        ESP_ERROR_CHECK(esp_timer_create(&timer_args, &s_debounce_timer));
+    } else {
+        /* Pokud uz bezi predchozi cekani, zrusime ho - zacneme cekat znovu */
+        esp_timer_stop(s_debounce_timer); /* neskodi, i kdyz uz nebezi */
+    }
+
+    esp_timer_start_once(s_debounce_timer, (uint64_t)LED_DEBOUNCE_MS * 1000);
 }
 
 app_driver_handle_t app_driver_light_init(void)
@@ -147,6 +192,8 @@ app_driver_handle_t app_driver_light_init(void)
     /* Nutne pro pouziti ledc_set_fade_with_time() / ledc_fade_start() */
     ESP_ERROR_CHECK(ledc_fade_func_install(0));
 
+    /* Prvni aplikace stavu pri startu aplikujeme rovnou (bez debounce) -
+     * neni na co cekat, jeste nic jineho neprislo. */
     ledc_apply();
 
     return (app_driver_handle_t)&s_led_ctx;
@@ -155,14 +202,14 @@ app_driver_handle_t app_driver_light_init(void)
 esp_err_t app_driver_light_set_power(app_driver_handle_t handle, bool power)
 {
     s_led_ctx.power = power;
-    ledc_apply();
+    schedule_apply();
     return ESP_OK;
 }
 
 esp_err_t app_driver_light_set_brightness(app_driver_handle_t handle, uint8_t brightness)
 {
     s_led_ctx.brightness = brightness;
-    ledc_apply();
+    schedule_apply();
     return ESP_OK;
 }
 
