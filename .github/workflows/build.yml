@@ -50,6 +50,10 @@ jobs:
               idf.py build
             "
 
+      - name: Oprava opravneni cache slozky (Docker vytvari soubory jako root)
+        if: always()
+        run: sudo chmod -R a+rX /home/runner/esp-matter-cache
+
       - name: Priprava vystupnich souboru
         run: |
           mkdir -p firmware_output
