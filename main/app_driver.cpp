@@ -12,12 +12,10 @@
  *   (+) LED pásku  -> +12V/+24V přímo ze zdroje
  *   GND zdroje LED pásku propojit s GND ESP32-C6
  */
-
 #include <esp_log.h>
 #include <driver/ledc.h>
 #include <esp_matter.h>
 #include <esp_matter_attribute_utils.h>
-
 #include "app_priv.h"
 
 static const char *TAG = "app_driver";
@@ -36,17 +34,28 @@ static led_strip_ctx_t s_led_ctx = {
     .brightness = DEFAULT_BRIGHTNESS,
 };
 
-/* Přepočet Matter úrovně (0-254) na LEDC duty (0-1023) s ohledem na power */
+/* Přepočet Matter úrovně (0-254) na LEDC duty (0-1023) s ohledem na power.
+ *
+ * POZOR - INVERTOVANA LOGIKA MOSFET MODULU:
+ * Pouzity MOSFET modul ma aktivni-LOW chovani (0V na signalnim vstupu =
+ * vystup ZAPNUT/propousti napeti, 3.3V na vstupu = vystup VYPNUT). Overeno
+ * mereni: GPIO LOW (vypnuto v HA) -> ~22V na vystupu (skoro plny vykon),
+ * GPIO trvale HIGH (100% jas) -> 0V na vystupu (zhasnuto). Proto tady
+ * hodnotu duty invertujeme (max_duty - duty), aby vysledne chovani
+ * pro uzivatele v aplikaci odpovidalo ocekavani (0 = zhasnuto, 100% = plny jas). */
 static uint32_t compute_duty(bool power, uint8_t brightness)
 {
-    if (!power) {
-        return 0;
-    }
-    /* ochrana proti brightness == 0 při zapnutém světle -> mírné minimum,
-     * ať pásek úplně nezhasne při "on" s nulovým jasem z ovladače */
     uint32_t max_duty = (1 << LED_LEDC_DUTY_RES) - 1; /* 1023 pro 10 bit */
+
+    if (!power) {
+        /* Chceme LED zhasnutou -> modul ma byt VYPNUTY -> GPIO musi byt HIGH -> duty = max */
+        return max_duty;
+    }
+
     uint32_t duty = (uint32_t)brightness * max_duty / 254;
-    return duty;
+    /* Invertujeme: vyssi pozadovany jas -> nizsi realne GPIO HIGH cas ->
+     * modul (aktivni-LOW) je zapnuty vetsinu casu -> vice svetla na pasku. */
+    return max_duty - duty;
 }
 
 static void ledc_apply(void)
