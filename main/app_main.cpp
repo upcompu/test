@@ -88,10 +88,8 @@ extern "C" void app_main()
     esp_err_t err = ESP_OK;
 
     /* Inicializace NVS - Matter i OpenThread potrebuji pro ulozeni dat.
-     * Pouziva se standardni "nvs" partition (ne vlastni "ot_storage") -
-     * nvs_flash_init_partition() vyzaduje partition se subtype NVS (0x02),
-     * ale nase "ot_storage" ma vlastni subtype 0x99, takze by selhala
-     * s ESP_ERR_NOT_FOUND (0x105). Standardni "nvs" partition tohle nema. */
+     * Podle oficialni ESP-IDF dokumentace OpenThreadu staci bezna "nvs"
+     * partition - vlastni "ot_storage" neni potreba a jen komplikuje veci. */
     err = nvs_flash_init();
     if (err == ESP_ERR_NVS_NO_FREE_PAGES || err == ESP_ERR_NVS_NEW_VERSION_FOUND) {
         ESP_ERROR_CHECK(nvs_flash_erase());
@@ -152,10 +150,53 @@ extern "C" void app_main()
         abort();
     }
 
+    /* KRITICKE: explicitni synchronizace hardwaru s ulozenym Matter stavem.
+     *
+     * Duvod: nas driver se pri startu hardwarove vzdy inicializuje jako
+     * "vypnuto" (kvuli oprave bliknuti pri startu - viz app_driver.cpp).
+     * Pokud ale Matter/ZCL vrstva ma z predchoziho behu ulozeno, ze svetlo
+     * ma byt "zapnuto" (napr. diky StartUpOnOff=On), ZCL vyhodnoti, ze
+     * pozadovana hodnota uz "sedi" s tim, co ma ulozene, a NEZAVOLA nas
+     * attribute_update callback (viz hlaska "Endpoint 1 On/off already
+     * set to new value" v logu) - hardware tak zustane vypnuty, i kdyz
+     * appka (HA/Apple Home) ukazuje "zapnuto". Proto po startu Matter
+     * stacku RUCNE precteme aktualni ulozene hodnoty atributu a vynutime
+     * jejich aplikaci na hardware, nezavisle na tom, jestli ZCL callback
+     * skutecne prisel. */
+    {
+        attribute_t *onoff_attr = attribute::get(light_endpoint_id, OnOff::Id,
+                                                   OnOff::Attributes::OnOff::Id);
+        attribute_t *level_attr = attribute::get(light_endpoint_id, LevelControl::Id,
+                                                   LevelControl::Attributes::CurrentLevel::Id);
+
+        esp_matter_attr_val_t onoff_val = esp_matter_invalid(NULL);
+        esp_matter_attr_val_t level_val = esp_matter_invalid(NULL);
+
+        if (onoff_attr) {
+            attribute::get_val(onoff_attr, &onoff_val);
+        }
+        if (level_attr) {
+            attribute::get_val(level_attr, &level_val);
+        }
+
+        if (onoff_val.type == ESP_MATTER_VAL_TYPE_BOOLEAN) {
+            app_driver_light_set_power(s_light_handle, onoff_val.val.b);
+        }
+        if (level_val.type == ESP_MATTER_VAL_TYPE_UINT8) {
+            app_driver_light_set_brightness(s_light_handle, level_val.val.u8);
+        }
+
+        ESP_LOGI(TAG, "Pocatecni synchronizace hardwaru: power=%d, brightness=%d",
+                 onoff_val.val.b, level_val.val.u8);
+    }
+
 #if CONFIG_ENABLE_CHIP_SHELL
     esp_matter::console::diagnostics_register_commands();
     esp_matter::console::wifi_register_commands();
     esp_matter::console::factoryreset_register_commands();
+#if CONFIG_OPENTHREAD_CLI
+    esp_matter::console::otcli_register_commands();
+#endif
     esp_matter::console::init();
 #endif
 
