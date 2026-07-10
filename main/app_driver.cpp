@@ -225,6 +225,16 @@ esp_err_t app_driver_light_set_brightness(app_driver_handle_t handle, uint8_t br
     return ESP_OK;
 }
 
+bool app_driver_light_get_power(app_driver_handle_t handle)
+{
+    return s_led_ctx.power;
+}
+
+uint8_t app_driver_light_get_brightness(app_driver_handle_t handle)
+{
+    return s_led_ctx.brightness;
+}
+
 /*
  * Tato funkce se volá z app_main.cpp při každé změně atributu přijaté
  * z Matter fabric (např. z Apple Home / Google Home / Home Assistant
@@ -253,62 +263,124 @@ esp_err_t app_driver_attribute_update(app_driver_handle_t driver_handle,
 }
 
 /* ---------------------------------------------------------------------
- * Externi fyzicke tlacitko (vyvedene na krabici)
+ * Externi fyzicke tlacitko (vyvedene na krabici) - kratky stisk = toggle
+ * on/off, podrzeni = plynule stmivani (smer se stridá kazdou relaci)
  * --------------------------------------------------------------------- */
 
-/* Stavovy automat pro softwarovy debounce tlacitka. Pouzivame polling
- * (ne preruseni) - jednodussi a spolehlivejsi pro tenhle ucel, zadne
- * problemy s ISR-safety pri volani Matter API z callbacku. */
+/* Stavovy automat pro softwarovy debounce + rozliseni kratky stisk / podrzeni.
+ * Pouzivame polling (ne preruseni) - jednodussi a spolehlivejsi pro tenhle
+ * ucel, zadne problemy s ISR-safety pri volani Matter API z callbacku. */
 typedef enum {
     BTN_STATE_IDLE,             /* tlacitko neni stisknute, cekame na stisk */
     BTN_STATE_DEBOUNCE_PRESS,   /* zaznamenan mozny stisk, overujeme stabilitu */
-    BTN_STATE_PRESSED,          /* stisk potvrzen, cekame na uvolneni */
+    BTN_STATE_HELD,             /* stisk potvrzen, cekame - bud kratky, nebo dlouhy */
+    BTN_STATE_DIMMING,          /* prah podrzeni prekrocen, aktivne stmivame */
     BTN_STATE_DEBOUNCE_RELEASE, /* zaznamenano mozne uvolneni, overujeme stabilitu */
 } btn_state_t;
 
+/* Smer stmivani se stridá kazdou relaci podrzeni (klasicky vzor
+ * jednotlacitkoveho stmivace: podrz -> zesvetla, podrz znovu -> ztmavne). */
+static bool s_dim_direction_up = true;
+
 static void button_task(void *arg)
 {
-    app_button_callback_t callback = (app_button_callback_t)arg;
+    /* arg obsahuje oba callbacky zabalene ve staticke strukture (viz
+     * app_driver_button_init) */
+    struct button_callbacks {
+        app_button_callback_t on_press;
+        app_button_dim_end_callback_t on_dim_end;
+    } *callbacks = (struct button_callbacks *)arg;
+
     btn_state_t state = BTN_STATE_IDLE;
     TickType_t debounce_start = 0;
+    TickType_t press_start = 0;
+    TickType_t last_dim_step = 0;
+    bool did_dim_this_session = false;
 
     while (true) {
-        /* Tlacitko spina proti GND (aktivni-LOW), pouzivame interni pull-up */
         bool raw_pressed = (gpio_get_level((gpio_num_t)APP_BUTTON_GPIO) == 0);
+        TickType_t now = xTaskGetTickCount();
 
         switch (state) {
         case BTN_STATE_IDLE:
             if (raw_pressed) {
                 state = BTN_STATE_DEBOUNCE_PRESS;
-                debounce_start = xTaskGetTickCount();
+                debounce_start = now;
             }
             break;
 
         case BTN_STATE_DEBOUNCE_PRESS:
             if (!raw_pressed) {
-                /* Bylo to jen zakmitani, ne skutecny stisk */
-                state = BTN_STATE_IDLE;
-            } else if ((xTaskGetTickCount() - debounce_start) >= pdMS_TO_TICKS(APP_BUTTON_DEBOUNCE_MS)) {
-                state = BTN_STATE_PRESSED;
+                state = BTN_STATE_IDLE; /* jen zakmitani */
+            } else if ((now - debounce_start) >= pdMS_TO_TICKS(APP_BUTTON_DEBOUNCE_MS)) {
+                state = BTN_STATE_HELD;
+                press_start = now;
+                did_dim_this_session = false;
             }
             break;
 
-        case BTN_STATE_PRESSED:
+        case BTN_STATE_HELD:
             if (!raw_pressed) {
                 state = BTN_STATE_DEBOUNCE_RELEASE;
-                debounce_start = xTaskGetTickCount();
+                debounce_start = now;
+            } else if ((now - press_start) >= pdMS_TO_TICKS(APP_BUTTON_LONGPRESS_MS)) {
+                /* Prah prekrocen - zaciname stmivat */
+                state = BTN_STATE_DIMMING;
+                last_dim_step = now;
+                did_dim_this_session = true;
+            }
+            break;
+
+        case BTN_STATE_DIMMING:
+            if (!raw_pressed) {
+                state = BTN_STATE_DEBOUNCE_RELEASE;
+                debounce_start = now;
+            } else if ((now - last_dim_step) >= pdMS_TO_TICKS(APP_BUTTON_DIM_STEP_MS)) {
+                last_dim_step = now;
+
+                uint8_t current = app_driver_light_get_brightness(nullptr);
+                int new_level = current;
+
+                if (s_dim_direction_up) {
+                    new_level += APP_BUTTON_DIM_STEP_SIZE;
+                    if (new_level > 254) {
+                        new_level = 254;
+                    }
+                } else {
+                    new_level -= APP_BUTTON_DIM_STEP_SIZE;
+                    if (new_level < 1) {
+                        new_level = 1; /* nechceme jit na 0 tlacitkem, to je "vypnout" */
+                    }
+                }
+
+                /* Ujistime se, ze svetlo je pri stmivani "zapnute" */
+                if (!app_driver_light_get_power(nullptr)) {
+                    app_driver_light_set_power(nullptr, true);
+                }
+                app_driver_light_set_brightness(nullptr, (uint8_t)new_level);
             }
             break;
 
         case BTN_STATE_DEBOUNCE_RELEASE:
             if (raw_pressed) {
-                /* Zakmitani pri uvolnovani, tlacitko je stale drzene */
-                state = BTN_STATE_PRESSED;
-            } else if ((xTaskGetTickCount() - debounce_start) >= pdMS_TO_TICKS(APP_BUTTON_DEBOUNCE_MS)) {
+                /* Zakmitani, tlacitko je stale drzene - vratime se do
+                 * spravneho stavu podle toho, jestli uz jsme stmivali */
+                state = did_dim_this_session ? BTN_STATE_DIMMING : BTN_STATE_HELD;
+            } else if ((now - debounce_start) >= pdMS_TO_TICKS(APP_BUTTON_DEBOUNCE_MS)) {
                 state = BTN_STATE_IDLE;
-                /* Platny, kompletni stisk+uvolneni cyklus - zavolame callback */
-                if (callback) {
-                    callback();
+
+                if (did_dim_this_session) {
+                    /* Byla to stmivaci relace - prehod smer pro pristi podrzeni
+                     * a synchronizuj vysledny jas do Matter/appky */
+                    s_dim_direction_up = !s_dim_direction_up;
+                    if (callbacks->on_dim_end) {
+                        callbacks->on_dim_end();
+                    }
+                } else {
+                    /* Byl to kratky stisk - preklop on/off */
+                    if (callbacks->on_press) {
+                        callbacks->on_press();
+                    }
                 }
             }
             break;
@@ -318,7 +390,8 @@ static void button_task(void *arg)
     }
 }
 
-app_driver_handle_t app_driver_button_init(app_button_callback_t on_press)
+app_driver_handle_t app_driver_button_init(app_button_callback_t on_press,
+                                            app_button_dim_end_callback_t on_dim_end)
 {
     gpio_config_t io_conf = {};
     io_conf.pin_bit_mask = (1ULL << APP_BUTTON_GPIO);
@@ -328,13 +401,21 @@ app_driver_handle_t app_driver_button_init(app_button_callback_t on_press)
     io_conf.intr_type = GPIO_INTR_DISABLE;
     ESP_ERROR_CHECK(gpio_config(&io_conf));
 
-    BaseType_t ret = xTaskCreate(button_task, "app_button", 2560, (void *)on_press, 5, NULL);
+    /* Callbacky musi prezit i po navratu z teto funkce - alokujeme staticky */
+    static struct {
+        app_button_callback_t on_press;
+        app_button_dim_end_callback_t on_dim_end;
+    } s_callbacks;
+    s_callbacks.on_press = on_press;
+    s_callbacks.on_dim_end = on_dim_end;
+
+    BaseType_t ret = xTaskCreate(button_task, "app_button", 3072, (void *)&s_callbacks, 5, NULL);
     if (ret != pdPASS) {
         ESP_LOGE(TAG, "Vytvoreni ulohy pro tlacitko selhalo");
         return nullptr;
     }
 
-    ESP_LOGI(TAG, "Tlacitko inicializovano na GPIO%d", APP_BUTTON_GPIO);
+    ESP_LOGI(TAG, "Tlacitko inicializovano na GPIO%d (podrzeni = stmivani)", APP_BUTTON_GPIO);
 
-    return (app_driver_handle_t)1; /* nepotrebujeme skutecny handle, jen nenulovou hodnotu */
+    return (app_driver_handle_t)1;
 }
