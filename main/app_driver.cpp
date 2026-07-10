@@ -16,7 +16,10 @@
 #include <esp_log.h>
 #include <math.h>
 #include <driver/ledc.h>
+#include <driver/gpio.h>
 #include <esp_timer.h>
+#include <freertos/FreeRTOS.h>
+#include <freertos/task.h>
 #include <esp_matter.h>
 #include <esp_matter_attribute_utils.h>
 
@@ -208,6 +211,15 @@ esp_err_t app_driver_light_set_power(app_driver_handle_t handle, bool power)
 
 esp_err_t app_driver_light_set_brightness(app_driver_handle_t handle, uint8_t brightness)
 {
+    /* Defenzivni osetreni - Matter LevelControl specifikace definuje platny
+     * rozsah CurrentLevel jako 0-254. Normalne HA/jine ridici softwary tenhle
+     * rozsah sami hlidaji (napr. HA prevadi svych 0-255 -> 0-254 pred
+     * odeslanim), ale radeji si to osetrime i sami pro pripad neocekavane
+     * hodnoty z jinych zdroju (napr. primy pristup mimo HA). */
+    if (brightness > 254) {
+        brightness = 254;
+    }
+
     s_led_ctx.brightness = brightness;
     schedule_apply();
     return ESP_OK;
@@ -238,4 +250,91 @@ esp_err_t app_driver_attribute_update(app_driver_handle_t driver_handle,
     }
 
     return err;
+}
+
+/* ---------------------------------------------------------------------
+ * Externi fyzicke tlacitko (vyvedene na krabici)
+ * --------------------------------------------------------------------- */
+
+/* Stavovy automat pro softwarovy debounce tlacitka. Pouzivame polling
+ * (ne preruseni) - jednodussi a spolehlivejsi pro tenhle ucel, zadne
+ * problemy s ISR-safety pri volani Matter API z callbacku. */
+typedef enum {
+    BTN_STATE_IDLE,             /* tlacitko neni stisknute, cekame na stisk */
+    BTN_STATE_DEBOUNCE_PRESS,   /* zaznamenan mozny stisk, overujeme stabilitu */
+    BTN_STATE_PRESSED,          /* stisk potvrzen, cekame na uvolneni */
+    BTN_STATE_DEBOUNCE_RELEASE, /* zaznamenano mozne uvolneni, overujeme stabilitu */
+} btn_state_t;
+
+static void button_task(void *arg)
+{
+    app_button_callback_t callback = (app_button_callback_t)arg;
+    btn_state_t state = BTN_STATE_IDLE;
+    TickType_t debounce_start = 0;
+
+    while (true) {
+        /* Tlacitko spina proti GND (aktivni-LOW), pouzivame interni pull-up */
+        bool raw_pressed = (gpio_get_level((gpio_num_t)APP_BUTTON_GPIO) == 0);
+
+        switch (state) {
+        case BTN_STATE_IDLE:
+            if (raw_pressed) {
+                state = BTN_STATE_DEBOUNCE_PRESS;
+                debounce_start = xTaskGetTickCount();
+            }
+            break;
+
+        case BTN_STATE_DEBOUNCE_PRESS:
+            if (!raw_pressed) {
+                /* Bylo to jen zakmitani, ne skutecny stisk */
+                state = BTN_STATE_IDLE;
+            } else if ((xTaskGetTickCount() - debounce_start) >= pdMS_TO_TICKS(APP_BUTTON_DEBOUNCE_MS)) {
+                state = BTN_STATE_PRESSED;
+            }
+            break;
+
+        case BTN_STATE_PRESSED:
+            if (!raw_pressed) {
+                state = BTN_STATE_DEBOUNCE_RELEASE;
+                debounce_start = xTaskGetTickCount();
+            }
+            break;
+
+        case BTN_STATE_DEBOUNCE_RELEASE:
+            if (raw_pressed) {
+                /* Zakmitani pri uvolnovani, tlacitko je stale drzene */
+                state = BTN_STATE_PRESSED;
+            } else if ((xTaskGetTickCount() - debounce_start) >= pdMS_TO_TICKS(APP_BUTTON_DEBOUNCE_MS)) {
+                state = BTN_STATE_IDLE;
+                /* Platny, kompletni stisk+uvolneni cyklus - zavolame callback */
+                if (callback) {
+                    callback();
+                }
+            }
+            break;
+        }
+
+        vTaskDelay(pdMS_TO_TICKS(APP_BUTTON_POLL_MS));
+    }
+}
+
+app_driver_handle_t app_driver_button_init(app_button_callback_t on_press)
+{
+    gpio_config_t io_conf = {};
+    io_conf.pin_bit_mask = (1ULL << APP_BUTTON_GPIO);
+    io_conf.mode = GPIO_MODE_INPUT;
+    io_conf.pull_up_en = GPIO_PULLUP_ENABLE;
+    io_conf.pull_down_en = GPIO_PULLDOWN_DISABLE;
+    io_conf.intr_type = GPIO_INTR_DISABLE;
+    ESP_ERROR_CHECK(gpio_config(&io_conf));
+
+    BaseType_t ret = xTaskCreate(button_task, "app_button", 2560, (void *)on_press, 5, NULL);
+    if (ret != pdPASS) {
+        ESP_LOGE(TAG, "Vytvoreni ulohy pro tlacitko selhalo");
+        return nullptr;
+    }
+
+    ESP_LOGI(TAG, "Tlacitko inicializovano na GPIO%d", APP_BUTTON_GPIO);
+
+    return (app_driver_handle_t)1; /* nepotrebujeme skutecny handle, jen nenulovou hodnotu */
 }
