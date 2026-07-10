@@ -32,14 +32,6 @@ typedef void *app_driver_handle_t;
 #define DEFAULT_POWER           true
 #define DEFAULT_BRIGHTNESS      128   /* 0-254, dle Matter Level Control clusteru */
 
-/* GPIO pro externi fyzicke tlacitko (vyvedene na krabici), zapojene mezi
- * GPIO a GND, spina proti zemi (pouzivame interni pull-up). GPIO2 je bezny,
- * volny pin - neni strapping (4,5,8,9,15), neni USB-JTAG (12,13), neni
- * UART konzole (16,17), neni SPI flash (24-30), neni vestavena RGB LED (8). */
-#define APP_BUTTON_GPIO          2
-#define APP_BUTTON_DEBOUNCE_MS   50
-#define APP_BUTTON_POLL_MS       20
-
 /* Inicializace GPIO/LEDC driveru LED pásku */
 app_driver_handle_t app_driver_light_init(void);
 
@@ -56,12 +48,40 @@ esp_err_t app_driver_attribute_update(app_driver_handle_t driver_handle,
                                        uint32_t attribute_id,
                                        void *val);
 
-/* Typ callback funkce volane pri platnem (odbouncovanem) stisknuti tlacitka */
+/* GPIO pro externi fyzicke tlacitko (vyvedene na krabici), zapojene mezi
+ * GPIO a GND, spina proti zemi (pouzivame interni pull-up). GPIO2 je bezny,
+ * volny pin - neni strapping (4,5,8,9,15), neni USB-JTAG (12,13), neni
+ * UART konzole (16,17), neni SPI flash (24-30), neni vestavena RGB LED (8). */
+#define APP_BUTTON_GPIO          2
+#define APP_BUTTON_DEBOUNCE_MS   50
+#define APP_BUTTON_POLL_MS       20
+
+/* Prah pro rozliseni kratkeho stisku (toggle on/off) od podrzeni (stmivani).
+ * Pokud je tlacitko drzeno dele nez tohle, prepne se do stmivaciho rezimu. */
+#define APP_BUTTON_LONGPRESS_MS  400
+
+/* Jak casto (ms) a o kolik urovni (z 0-254) se meni jas behem podrzeni. */
+#define APP_BUTTON_DIM_STEP_MS   150
+#define APP_BUTTON_DIM_STEP_SIZE 20
+
+/* Typ callback funkce volane po platnem kratkem stisknuti (toggle on/off) */
 typedef void (*app_button_callback_t)(void);
 
-/* Inicializace externiho tlacitka. Callback se zavola po kazdem platnem
- * stisk+uvolneni cyklu (kratky stisk). */
-app_driver_handle_t app_driver_button_init(app_button_callback_t on_press);
+/* Typ callback funkce volane po skonceni stmivaci relace (podrzeni a
+ * uvolneni) - umoznuje synchronizovat vysledny jas do Matter/appky. */
+typedef void (*app_button_dim_end_callback_t)(void);
+
+/* Inicializace externiho tlacitka.
+ *   on_press   - zavola se po kratkem stisk+uvolneni cyklu (toggle on/off)
+ *   on_dim_end - zavola se po uvolneni tlacitka, pokud predtim probehlo
+ *                stmivani (podrzeni), aby se dal vysledny jas synchronizovat
+ *                do Matter atributu */
+app_driver_handle_t app_driver_button_init(app_button_callback_t on_press,
+                                            app_button_dim_end_callback_t on_dim_end);
+
+/* Cteni aktualniho stavu driveru - pro synchronizaci po stmivani tlacitkem */
+bool app_driver_light_get_power(app_driver_handle_t handle);
+uint8_t app_driver_light_get_brightness(app_driver_handle_t handle);
 
 #ifdef __cplusplus
 }
