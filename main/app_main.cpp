@@ -65,6 +65,34 @@ static esp_err_t app_identification_cb(identification::callback_type_t type, uin
     return ESP_OK;
 }
 
+/* Callback volany po platnem stisku externiho tlacitka (viz app_driver.cpp).
+ * Prectee aktualni OnOff stav a preklopi ho pres oficialni Matter attribute
+ * API - tim se zmena promitne stejnou cestou jako povel z appky (HA/Apple
+ * Home), tedy vcetne aktualizace zobrazeni v appce, ne jen fyzickeho stavu
+ * hardwaru. */
+static void app_button_pressed_cb(void)
+{
+    attribute_t *onoff_attr = attribute::get(light_endpoint_id, OnOff::Id,
+                                               OnOff::Attributes::OnOff::Id);
+    if (!onoff_attr) {
+        ESP_LOGE(TAG, "Tlacitko: OnOff atribut nenalezen");
+        return;
+    }
+
+    esp_matter_attr_val_t val = esp_matter_invalid(NULL);
+    attribute::get_val(onoff_attr, &val);
+
+    if (val.type != ESP_MATTER_VAL_TYPE_BOOLEAN) {
+        ESP_LOGE(TAG, "Tlacitko: neocekavany typ OnOff atributu");
+        return;
+    }
+
+    val.val.b = !val.val.b;
+    attribute::update(light_endpoint_id, OnOff::Id, OnOff::Attributes::OnOff::Id, &val);
+
+    ESP_LOGI(TAG, "Tlacitko stisknuto - svetlo preklopeno na power=%d", val.val.b);
+}
+
 /* Hlavni callback pri zmene libovolneho atributu z Matter site */
 static esp_err_t app_attribute_update_cb(attribute::callback_type_t type, uint16_t endpoint_id,
                                           uint32_t cluster_id, uint32_t attribute_id,
@@ -121,6 +149,11 @@ extern "C" void app_main()
 
     light_endpoint_id = endpoint::get_id(light_endpoint);
     ESP_LOGI(TAG, "Svetlo vytvoreno, endpoint_id=%d", light_endpoint_id);
+
+    /* Inicializace externiho fyzickeho tlacitka (vyvedene na krabici).
+     * Musi byt az PO nastaveni light_endpoint_id, protoze callback
+     * app_button_pressed_cb ho pouziva. */
+    app_driver_button_init(app_button_pressed_cb);
 
     /* Volitelne: pridani OTA requestor clusteru pro update firmwaru pres Matter */
 #if CONFIG_ENABLE_OTA_REQUESTOR
