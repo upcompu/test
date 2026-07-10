@@ -56,6 +56,8 @@ static esp_err_t app_identification_cb(identification::callback_type_t type, uin
     return ESP_OK;
 }
 
+/* Actual work done on the CHIP/Matter stack thread - safe to call
+ * attribute::update() here. Called via ScheduleLambda from the button task. */
 static void do_button_toggle_on_matter_thread(void)
 {
     attribute_t *onoff_attr = attribute::get(light_endpoint_id, OnOff::Id,
@@ -84,17 +86,32 @@ static void do_button_dim_sync_on_matter_thread(void)
     bool power = app_driver_light_get_power(s_light_handle);
     uint8_t brightness = app_driver_light_get_brightness(s_light_handle);
 
-    esp_matter_attr_val_t onoff_val = esp_matter_bool(power);
-    attribute::update(light_endpoint_id, OnOff::Id, OnOff::Attributes::OnOff::Id, &onoff_val);
+    attribute_t *onoff_attr = attribute::get(light_endpoint_id, OnOff::Id,
+                                               OnOff::Attributes::OnOff::Id);
+    if (onoff_attr) {
+        esp_matter_attr_val_t onoff_val = esp_matter_invalid(NULL);
+        attribute::get_val(onoff_attr, &onoff_val);
+        onoff_val.val.b = power;
+        attribute::update(light_endpoint_id, OnOff::Id, OnOff::Attributes::OnOff::Id, &onoff_val);
+    }
 
-    esp_matter_attr_val_t level_val = esp_matter_uint8(brightness);
-    attribute::update(light_endpoint_id, LevelControl::Id,
-                       LevelControl::Attributes::CurrentLevel::Id, &level_val);
+    attribute_t *level_attr = attribute::get(light_endpoint_id, LevelControl::Id,
+                                               LevelControl::Attributes::CurrentLevel::Id);
+    if (level_attr) {
+        esp_matter_attr_val_t level_val = esp_matter_invalid(NULL);
+        attribute::get_val(level_attr, &level_val);
+        level_val.val.u8 = brightness;
+        attribute::update(light_endpoint_id, LevelControl::Id,
+                           LevelControl::Attributes::CurrentLevel::Id, &level_val);
+    }
 
     ESP_LOGI(TAG, "Button: dim session ended - synced power=%d, brightness=%d",
              power, brightness);
 }
 
+/* These run in the button's own FreeRTOS task context. Matter attribute
+ * API is not safe to call directly from a non-CHIP task, so we marshal
+ * the actual work onto the CHIP/Matter stack thread via ScheduleLambda. */
 static void app_button_pressed_cb(void)
 {
     chip::DeviceLayer::SystemLayer().ScheduleLambda([]() {
