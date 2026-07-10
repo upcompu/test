@@ -1,7 +1,6 @@
 name: Build Matter LED firmware (ESP32-C6, Thread) - ESP-IDF v5.5.4 + pinned esp-matter
 
 on:
-  push:
   workflow_dispatch:
 
 env:
