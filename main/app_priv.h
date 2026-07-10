@@ -35,11 +35,18 @@ typedef void *app_driver_handle_t;
 /* Inicializace GPIO/LEDC driveru LED pásku */
 app_driver_handle_t app_driver_light_init(void);
 
-/* Nastavení on/off */
+/* Nastavení on/off - pouziva debounce (vhodne pro povely z Matter/appky) */
 esp_err_t app_driver_light_set_power(app_driver_handle_t handle, bool power);
 
-/* Nastavení jasu, hodnota 0-254 (Matter CurrentLevel) */
+/* Nastavení jasu, hodnota 0-254 (Matter CurrentLevel) - pouziva debounce */
 esp_err_t app_driver_light_set_brightness(app_driver_handle_t handle, uint8_t brightness);
+
+/* Okamzita (bez debounce) aplikace stavu primo na hardware - urcene pro
+ * pouziti behem plynuleho stmivani tlacitkem, kde debounce mechanismus
+ * (navrzeny pro filtrovani Matter/ZCL prikazu) by kolidoval s vlastnim
+ * casovanim kroku stmivani a znemoznil viditelnou zmenu za chodu. */
+esp_err_t app_driver_light_set_power_immediate(app_driver_handle_t handle, bool power);
+esp_err_t app_driver_light_set_brightness_immediate(app_driver_handle_t handle, uint8_t brightness);
 
 /* Callback volaný Matter stackem při změně libovolného atributu */
 esp_err_t app_driver_attribute_update(app_driver_handle_t driver_handle,
