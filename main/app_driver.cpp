@@ -1,18 +1,3 @@
-/*
- * app_driver.cpp
- *
- * Driver jednobarevného LED pásku pro ESP32-C6.
- * LED pásek (12V/24V) se připojuje přes N-MOSFET (např. IRLZ44N) na GPIO,
- * ktery je rizen PWM signálem z periferie LEDC.
- *
- * Zapojení (příklad):
- *   GPIO18 --[1k]--> Gate MOSFETu
- *   Drain MOSFETu  -> (-) LED pásku
- *   Source MOSFETu -> GND (společná se zdrojem LED pásku)
- *   (+) LED pásku  -> +12V/+24V přímo ze zdroje
- *   GND zdroje LED pásku propojit s GND ESP32-C6
- */
-
 #include <esp_log.h>
 #include <math.h>
 #include <driver/ledc.h>
@@ -30,20 +15,9 @@ static const char *TAG = "app_driver";
 using namespace esp_matter;
 using namespace esp_matter::attribute;
 
-/* Interní stav driveru.
- *
- * DULEZITE: power se VZDY inicializuje jako "false" (vypnuto), bez ohledu
- * na DEFAULT_POWER makro (to se pouziva jen pro pocatecni hodnotu Matter
- * atributu v app_main.cpp, ne pro hardware). Duvod: pokud by se hardware
- * hned pri startu rozsvitil (DEFAULT_POWER=true) a Matter/ZCL vzapeti
- * podle ulozene "StartUpOnOff" preference svetlo zase vypnul, dochazelo
- * by k viditelnemu bliknuti (vypnuto->zapnuto->vypnuto behem par ms) -
- * presne to, co bylo pozorovano. Zacit vzdy z bezpecneho "vypnuto" stavu
- * a nechat Matter/ZCL nastavit spravny stav podle ulozene preference
- * eliminuje tohle bliknuti uplne. */
 typedef struct {
     bool power;
-    uint8_t brightness; /* 0-254 dle Matter Level Control */
+    uint8_t brightness;
 } led_strip_ctx_t;
 
 static led_strip_ctx_t s_led_ctx = {
@@ -51,77 +25,28 @@ static led_strip_ctx_t s_led_ctx = {
     .brightness = DEFAULT_BRIGHTNESS,
 };
 
-/* Doba (v ms) hardwaroveho "fade" prechodu mezi soucasnym a novym duty
- * cyklem. Reseni bliknuti pri zapnuti/prepnuti - misto okamziteho skoku
- * z 0 na cilovou hodnotu LEDC hardwarove plynule "najede" na novou hodnotu,
- * coz eliminuje vizualni cvaknuti/bliknuti a navic vypada esteticky lepe
- * (jemne rozsviceni misto tvrdeho skoku). */
 #define LED_FADE_TIME_MS    200
-
-/* DEBOUNCE - reseni tranzientni "min-level" mezihodnoty:
- * Matter/ZCL Level Control cluster pri prikazu "zapnout" standardne (dle
- * specifikace) posle NEKOLIK po sobe jdoucich zmen urovne - napr. nejdriv
- * cilovou hodnotu, pak kratce minimum (brightness=1), pak zase cilovou
- * hodnotu. Bez filtrace by kazda z techto zmen okamzite sla na hardware,
- * coz zpusobuje viditelne "skubnuti/bliknuti" i s fade efektem (fade
- * nestihne dobehnout, nez prijde dalsi prikaz). Reseni: pockame kratkou
- * dobu (DEBOUNCE_MS) po kazde zadosti o zmenu - pokud behem ni prijde
- * dalsi zmena, predchozi se zrusi a ceka se znovu. Na hardware se tak
- * aplikuje jen POSLEDNI hodnota z rychleho sledu prikazu. */
 #define LED_DEBOUNCE_MS     180
 
 static esp_timer_handle_t s_debounce_timer = nullptr;
 
-/* Gamma korekce pro linearni vnimani jasu lidskym okem.
- * Lidske oko vnima jas logaritmicky, ne linearne - primy linearni prevod
- * Matter urovne (0-254) na PWM duty cyklus zpusobuje, ze pri 50% Matter
- * urovne vypada pasek subjektivne mnohem jasnejsi nez "poloviste" (typicky
- * 70-80% vnimaneho jasu), a teprve blizko 0% jas rychle klesa. Standardni
- * reseni je aplikovat mocninnou (gamma) korekci na vstupni hodnotu pred
- * prevodem na PWM duty. Gamma ~2.2 je bezny, dobre osvedceny kompromis. */
 #define LED_GAMMA       2.2f
-
-/* Minimalni "podlaha" PWM duty cyklu (jako zlomek max_duty), pod kterou
- * nikdy nejdeme, pokud je svetlo zapnute. Bez tohohle by gamma korekce
- * pri nizkem jasu (napr. 5%) vytvorila extremne kratky impuls (< 1 mikrosekunda
- * pri nasi frekvenci 5kHz), ktery levny MOSFET modul nestiha spolehlive
- * zpracovat a vysledkem je viditelne blikani. S podlahou 5% mame jistotu
- * dostatecne dlouheho impulsu pro spolehlive spinani, a zbytek rozsahu jasu
- * (5%-100%) se namapuje s gamma korekci nad tuto podlahu. */
 #define LED_MIN_DUTY_FRACTION   0.05f
 
-/* Přepočet Matter úrovně (0-254) na LEDC duty (0-1023) s ohledem na power.
- *
- * POZNAMKA K HISTORII: puvodne jsme se domnivali, ze MOSFET modul ma
- * invertovanou (aktivni-LOW) logiku, na zaklade mereni napeti na vystupu
- * BEZ pripojene zateze (LED pasku). Takove mereni naprazdno ale bylo
- * zavadejici - modul spina zapornou (-) vetev pasku (low-side zapojeni),
- * takze bez pripojene zateze byl vystupni bod elektricky "plovouci" a
- * multimetr zachytil nahodne, nesmyslne hodnoty. Realny test s pripojenym
- * LED paskem potvrdil, ze modul funguje SPRAVNE s touto standardni
- * (neinvertovanou) logikou - proto zustava puvodni, jednoducha varianta. */
 static uint32_t compute_duty(bool power, uint8_t brightness)
 {
     if (!power) {
         return 0;
     }
 
-    uint32_t max_duty = (1 << LED_LEDC_DUTY_RES) - 1; /* 1023 pro 10 bit */
+    uint32_t max_duty = (1 << LED_LEDC_DUTY_RES) - 1;
 
     if (brightness == 0) {
-        /* Svetlo "zapnute", ale s nulovym jasem z ovladace - drzime aspon
-         * minimalni podlahu, ať pasek uplne nezhasne pri "on" s brightness=0. */
         return (uint32_t)(LED_MIN_DUTY_FRACTION * (float)max_duty);
     }
 
-    /* Normalizace na rozsah 0.0 - 1.0 */
     float linear_fraction = (float)brightness / 254.0f;
-
-    /* Gamma korekce - mocninna krivka misto primeho linearniho prevodu */
     float corrected_fraction = powf(linear_fraction, LED_GAMMA);
-
-    /* Namapovani vysledku nad minimalni podlahu, aby zadny impuls nebyl
-     * prilis kratky pro spolehlive spinani modulu. */
     float final_fraction = LED_MIN_DUTY_FRACTION +
                             (1.0f - LED_MIN_DUTY_FRACTION) * corrected_fraction;
 
@@ -130,9 +55,6 @@ static uint32_t compute_duty(bool power, uint8_t brightness)
     return duty;
 }
 
-/* Aplikace noveho duty cyklu s hardwarovym plynulym prechodem (fade),
- * misto okamziteho skoku - eliminuje bliknuti/cvaknuti pri zmene stavu.
- * Tohle je "skutecne" volane az po uplynuti debounce doby (viz nize). */
 static void ledc_apply(void)
 {
     uint32_t duty = compute_duty(s_led_ctx.power, s_led_ctx.brightness);
@@ -144,17 +66,11 @@ static void ledc_apply(void)
              s_led_ctx.power, s_led_ctx.brightness, duty);
 }
 
-/* Callback debounce timeru - zavola se az kdyz po LED_DEBOUNCE_MS
- * neprisla zadna dalsi zmena (viz schedule_apply nize). */
 static void debounce_timer_cb(void *arg)
 {
     ledc_apply();
 }
 
-/* Naplanuje aplikaci aktualniho stavu (s_led_ctx) na hardware az po
- * uplynuti debounce doby. Pokud prijde dalsi pozadavek drive, predchozi
- * casovac se zrusi a ceka se znovu - na hardware se tak dostane jen
- * posledni hodnota z rychleho sledu prikazu od Matter/ZCL vrstvy. */
 static void schedule_apply(void)
 {
     if (s_debounce_timer == nullptr) {
@@ -166,8 +82,7 @@ static void schedule_apply(void)
         };
         ESP_ERROR_CHECK(esp_timer_create(&timer_args, &s_debounce_timer));
     } else {
-        /* Pokud uz bezi predchozi cekani, zrusime ho - zacneme cekat znovu */
-        esp_timer_stop(s_debounce_timer); /* neskodi, i kdyz uz nebezi */
+        esp_timer_stop(s_debounce_timer);
     }
 
     esp_timer_start_once(s_debounce_timer, (uint64_t)LED_DEBOUNCE_MS * 1000);
@@ -192,11 +107,8 @@ app_driver_handle_t app_driver_light_init(void)
     ch_cfg.hpoint     = 0;
     ESP_ERROR_CHECK(ledc_channel_config(&ch_cfg));
 
-    /* Nutne pro pouziti ledc_set_fade_with_time() / ledc_fade_start() */
     ESP_ERROR_CHECK(ledc_fade_func_install(0));
 
-    /* Prvni aplikace stavu pri startu aplikujeme rovnou (bez debounce) -
-     * neni na co cekat, jeste nic jineho neprislo. */
     ledc_apply();
 
     return (app_driver_handle_t)&s_led_ctx;
@@ -211,17 +123,30 @@ esp_err_t app_driver_light_set_power(app_driver_handle_t handle, bool power)
 
 esp_err_t app_driver_light_set_brightness(app_driver_handle_t handle, uint8_t brightness)
 {
-    /* Defenzivni osetreni - Matter LevelControl specifikace definuje platny
-     * rozsah CurrentLevel jako 0-254. Normalne HA/jine ridici softwary tenhle
-     * rozsah sami hlidaji (napr. HA prevadi svych 0-255 -> 0-254 pred
-     * odeslanim), ale radeji si to osetrime i sami pro pripad neocekavane
-     * hodnoty z jinych zdroju (napr. primy pristup mimo HA). */
     if (brightness > 254) {
         brightness = 254;
     }
 
     s_led_ctx.brightness = brightness;
     schedule_apply();
+    return ESP_OK;
+}
+
+esp_err_t app_driver_light_set_power_immediate(app_driver_handle_t handle, bool power)
+{
+    s_led_ctx.power = power;
+    ledc_apply();
+    return ESP_OK;
+}
+
+esp_err_t app_driver_light_set_brightness_immediate(app_driver_handle_t handle, uint8_t brightness)
+{
+    if (brightness > 254) {
+        brightness = 254;
+    }
+
+    s_led_ctx.brightness = brightness;
+    ledc_apply();
     return ESP_OK;
 }
 
@@ -235,11 +160,6 @@ uint8_t app_driver_light_get_brightness(app_driver_handle_t handle)
     return s_led_ctx.brightness;
 }
 
-/*
- * Tato funkce se volá z app_main.cpp při každé změně atributu přijaté
- * z Matter fabric (např. z Apple Home / Google Home / Home Assistant
- * přes Thread Border Router).
- */
 esp_err_t app_driver_attribute_update(app_driver_handle_t driver_handle,
                                        uint16_t endpoint_id,
                                        uint32_t cluster_id,
@@ -262,30 +182,18 @@ esp_err_t app_driver_attribute_update(app_driver_handle_t driver_handle,
     return err;
 }
 
-/* ---------------------------------------------------------------------
- * Externi fyzicke tlacitko (vyvedene na krabici) - kratky stisk = toggle
- * on/off, podrzeni = plynule stmivani (smer se stridá kazdou relaci)
- * --------------------------------------------------------------------- */
-
-/* Stavovy automat pro softwarovy debounce + rozliseni kratky stisk / podrzeni.
- * Pouzivame polling (ne preruseni) - jednodussi a spolehlivejsi pro tenhle
- * ucel, zadne problemy s ISR-safety pri volani Matter API z callbacku. */
 typedef enum {
-    BTN_STATE_IDLE,             /* tlacitko neni stisknute, cekame na stisk */
-    BTN_STATE_DEBOUNCE_PRESS,   /* zaznamenan mozny stisk, overujeme stabilitu */
-    BTN_STATE_HELD,             /* stisk potvrzen, cekame - bud kratky, nebo dlouhy */
-    BTN_STATE_DIMMING,          /* prah podrzeni prekrocen, aktivne stmivame */
-    BTN_STATE_DEBOUNCE_RELEASE, /* zaznamenano mozne uvolneni, overujeme stabilitu */
+    BTN_STATE_IDLE,
+    BTN_STATE_DEBOUNCE_PRESS,
+    BTN_STATE_HELD,
+    BTN_STATE_DIMMING,
+    BTN_STATE_DEBOUNCE_RELEASE,
 } btn_state_t;
 
-/* Smer stmivani se stridá kazdou relaci podrzeni (klasicky vzor
- * jednotlacitkoveho stmivace: podrz -> zesvetla, podrz znovu -> ztmavne). */
 static bool s_dim_direction_up = true;
 
 static void button_task(void *arg)
 {
-    /* arg obsahuje oba callbacky zabalene ve staticke strukture (viz
-     * app_driver_button_init) */
     struct button_callbacks {
         app_button_callback_t on_press;
         app_button_dim_end_callback_t on_dim_end;
@@ -311,7 +219,7 @@ static void button_task(void *arg)
 
         case BTN_STATE_DEBOUNCE_PRESS:
             if (!raw_pressed) {
-                state = BTN_STATE_IDLE; /* jen zakmitani */
+                state = BTN_STATE_IDLE;
             } else if ((now - debounce_start) >= pdMS_TO_TICKS(APP_BUTTON_DEBOUNCE_MS)) {
                 state = BTN_STATE_HELD;
                 press_start = now;
@@ -324,7 +232,6 @@ static void button_task(void *arg)
                 state = BTN_STATE_DEBOUNCE_RELEASE;
                 debounce_start = now;
             } else if ((now - press_start) >= pdMS_TO_TICKS(APP_BUTTON_LONGPRESS_MS)) {
-                /* Prah prekrocen - zaciname stmivat */
                 state = BTN_STATE_DIMMING;
                 last_dim_step = now;
                 did_dim_this_session = true;
@@ -349,35 +256,29 @@ static void button_task(void *arg)
                 } else {
                     new_level -= APP_BUTTON_DIM_STEP_SIZE;
                     if (new_level < 1) {
-                        new_level = 1; /* nechceme jit na 0 tlacitkem, to je "vypnout" */
+                        new_level = 1;
                     }
                 }
 
-                /* Ujistime se, ze svetlo je pri stmivani "zapnute" */
                 if (!app_driver_light_get_power(nullptr)) {
-                    app_driver_light_set_power(nullptr, true);
+                    app_driver_light_set_power_immediate(nullptr, true);
                 }
-                app_driver_light_set_brightness(nullptr, (uint8_t)new_level);
+                app_driver_light_set_brightness_immediate(nullptr, (uint8_t)new_level);
             }
             break;
 
         case BTN_STATE_DEBOUNCE_RELEASE:
             if (raw_pressed) {
-                /* Zakmitani, tlacitko je stale drzene - vratime se do
-                 * spravneho stavu podle toho, jestli uz jsme stmivali */
                 state = did_dim_this_session ? BTN_STATE_DIMMING : BTN_STATE_HELD;
             } else if ((now - debounce_start) >= pdMS_TO_TICKS(APP_BUTTON_DEBOUNCE_MS)) {
                 state = BTN_STATE_IDLE;
 
                 if (did_dim_this_session) {
-                    /* Byla to stmivaci relace - prehod smer pro pristi podrzeni
-                     * a synchronizuj vysledny jas do Matter/appky */
                     s_dim_direction_up = !s_dim_direction_up;
                     if (callbacks->on_dim_end) {
                         callbacks->on_dim_end();
                     }
                 } else {
-                    /* Byl to kratky stisk - preklop on/off */
                     if (callbacks->on_press) {
                         callbacks->on_press();
                     }
@@ -401,7 +302,6 @@ app_driver_handle_t app_driver_button_init(app_button_callback_t on_press,
     io_conf.intr_type = GPIO_INTR_DISABLE;
     ESP_ERROR_CHECK(gpio_config(&io_conf));
 
-    /* Callbacky musi prezit i po navratu z teto funkce - alokujeme staticky */
     static struct {
         app_button_callback_t on_press;
         app_button_dim_end_callback_t on_dim_end;
@@ -411,11 +311,11 @@ app_driver_handle_t app_driver_button_init(app_button_callback_t on_press,
 
     BaseType_t ret = xTaskCreate(button_task, "app_button", 3072, (void *)&s_callbacks, 5, NULL);
     if (ret != pdPASS) {
-        ESP_LOGE(TAG, "Vytvoreni ulohy pro tlacitko selhalo");
+        ESP_LOGE(TAG, "Button task creation failed");
         return nullptr;
     }
 
-    ESP_LOGI(TAG, "Tlacitko inicializovano na GPIO%d (podrzeni = stmivani)", APP_BUTTON_GPIO);
+    ESP_LOGI(TAG, "Button initialized on GPIO%d", APP_BUTTON_GPIO);
 
     return (app_driver_handle_t)1;
 }
