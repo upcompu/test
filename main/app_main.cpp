@@ -65,7 +65,7 @@ static esp_err_t app_identification_cb(identification::callback_type_t type, uin
     return ESP_OK;
 }
 
-/* Callback volany po platnem stisku externiho tlacitka (viz app_driver.cpp).
+/* Callback volany po kratkem stisku externiho tlacitka (viz app_driver.cpp).
  * Prectee aktualni OnOff stav a preklopi ho pres oficialni Matter attribute
  * API - tim se zmena promitne stejnou cestou jako povel z appky (HA/Apple
  * Home), tedy vcetne aktualizace zobrazeni v appce, ne jen fyzickeho stavu
@@ -90,7 +90,30 @@ static void app_button_pressed_cb(void)
     val.val.b = !val.val.b;
     attribute::update(light_endpoint_id, OnOff::Id, OnOff::Attributes::OnOff::Id, &val);
 
-    ESP_LOGI(TAG, "Tlacitko stisknuto - svetlo preklopeno na power=%d", val.val.b);
+    ESP_LOGI(TAG, "Tlacitko: kratky stisk - svetlo preklopeno na power=%d", val.val.b);
+}
+
+/* Callback volany po dokonceni stmivaci relace (podrzeni tlacitka a jeho
+ * uvolneni). Behem samotneho stmivani driver (app_driver.cpp) meni hardware
+ * primo, bez prubezne synchronizace do Matter - az po uvolneni tlacitka
+ * precteme vysledny stav z driveru a posleme ho jako Matter atributy, ať
+ * appka (HA/Apple Home) vidi finalni jas a stav zapnuti. Prubezna
+ * synchronizace behem kazdeho kroku stmivani by zbytecne zatezovala
+ * Matter/Thread sit mnoha rychlymi zpravami. */
+static void app_button_dim_end_cb(void)
+{
+    bool power = app_driver_light_get_power(s_light_handle);
+    uint8_t brightness = app_driver_light_get_brightness(s_light_handle);
+
+    esp_matter_attr_val_t onoff_val = esp_matter_bool(power);
+    attribute::update(light_endpoint_id, OnOff::Id, OnOff::Attributes::OnOff::Id, &onoff_val);
+
+    esp_matter_attr_val_t level_val = esp_matter_uint8(brightness);
+    attribute::update(light_endpoint_id, LevelControl::Id,
+                       LevelControl::Attributes::CurrentLevel::Id, &level_val);
+
+    ESP_LOGI(TAG, "Tlacitko: stmivani dokonceno - synchronizovano power=%d, brightness=%d",
+             power, brightness);
 }
 
 /* Hlavni callback pri zmene libovolneho atributu z Matter site */
@@ -151,9 +174,9 @@ extern "C" void app_main()
     ESP_LOGI(TAG, "Svetlo vytvoreno, endpoint_id=%d", light_endpoint_id);
 
     /* Inicializace externiho fyzickeho tlacitka (vyvedene na krabici).
-     * Musi byt az PO nastaveni light_endpoint_id, protoze callback
-     * app_button_pressed_cb ho pouziva. */
-    app_driver_button_init(app_button_pressed_cb);
+     * Musi byt az PO nastaveni light_endpoint_id, protoze callbacky
+     * ho pouzivaji. Kratky stisk = toggle on/off, podrzeni = stmivani. */
+    app_driver_button_init(app_button_pressed_cb, app_button_dim_end_cb);
 
     /* Volitelne: pridani OTA requestor clusteru pro update firmwaru pres Matter */
 #if CONFIG_ENABLE_OTA_REQUESTOR
